@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="Spec.md" />
+  </Folder>
+  <Project Path="TestDatabase/TestDatabase.sqlproj" Id="e4550009-27eb-45c2-bd04-8373ad2759aa">
+    <Build />
+    <Deploy />
+  </Project>
+  <Project Path="TestFunction/TestFunction.csproj" Id="37234193-eb50-41d1-82ec-625a4c21df63" />
+  <Project Path="TestSolution/TestSolution.csproj" />
+</Solution>

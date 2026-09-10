@@ -1,0 +1,30 @@
+@page
+@model ShareModel
+@{
+    ViewData["Title"] = "Upload files";
+    Layout = "_Layout";
+}
+
+<h1>Upload files</h1>
+
+@if (!Model.IsValid)
+{
+    <div class="alert alert-danger">
+        This upload link is invalid or has expired. Please request a new link.
+    </div>
+}
+else
+{
+    @if (Model.StatusMessage is not null)
+    {
+        <div class="alert alert-info">@Model.StatusMessage</div>
+    }
+
+    <p class="text-muted">You can upload files to a shared folder using this secure link.</p>
+
+    <form method="post" enctype="multipart/form-data" class="mb-3 d-flex gap-2"
+          asp-page="/Share" asp-page-handler="Upload" asp-route-token="@Model.Token">
+        <input type="file" name="upload" class="form-control w-auto" required />
+        <button type="submit" class="btn btn-primary">Upload</button>
+    </form>
+}
