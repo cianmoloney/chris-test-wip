@@ -1,0 +1,78 @@
+@page
+@model StaffModel
+@{
+    ViewData["Title"] = "Staff";
+}
+
+<h1>Staff</h1>
+@if (User.HasClaim("permission", TestShared.Permissions.StaffWrite))
+{ <a asp-page="/StaffNew" class="btn btn-primary mb-3">Add staff member</a> }
+
+@if (Model.StatusMessage is not null)
+{
+    <div class="alert alert-warning">@Model.StatusMessage</div>
+}
+
+<form method="get" class="mb-3 d-flex gap-2 flex-wrap">
+    <input type="text" asp-for="Filter" class="form-control w-auto" placeholder="Filter by name, email or role" />
+    <select asp-for="SortBy" class="form-select w-auto">
+        <option value="">Sort by name</option>
+        <option value="email">Sort by email</option>
+        <option value="role">Sort by role</option>
+        <option value="registered">Sort by registration date</option>
+    </select>
+    <button type="submit" class="btn btn-primary">Apply</button>
+    <a asp-page="/GenerateLink" class="btn btn-outline-secondary">Generate secure link</a>
+</form>
+
+@if (Model.StaffList.Count == 0)
+{
+    <p class="text-muted">No staff found.</p>
+}
+else
+{
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Role</th>
+                <th>Type</th>
+                <th>Ready for work</th>
+                <th>Registered</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var staff in Model.StaffList)
+            {
+                <tr>
+                    <td>@(staff.StaffId ?? "—")</td>
+                    <td><a asp-page="/StaffMember" asp-route-id="@staff.Id">@staff.FirstName @staff.LastName</a></td>
+                    <td>@staff.Email</td>
+                    <td>@staff.PhoneNumber</td>
+                    <td>@(staff.StaffRole?.Name ?? "—")</td>
+                    <td>@(staff.StaffType?.Name ?? "—")</td>
+                    <td>
+                        @if (Model.Readiness.TryGetValue(staff.Id, out var readiness) && readiness.IsReady)
+                        {
+                            <span class="badge bg-success">Ready</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-warning text-dark" title="@string.Join(" ", readiness?.Reasons ?? [])">Not ready</span>
+                        }
+                    </td>
+                    <td>@staff.RegisteredAt.ToLocalTime().ToString("g")</td>
+                    <td>
+                        <a asp-page="/StaffMember" asp-route-id="@staff.Id" class="btn btn-sm btn-outline-primary">Edit</a>
+                        <a asp-page="/GenerateLink" asp-route-staffId="@staff.Id" asp-route-linkType="upload" class="btn btn-sm btn-outline-secondary">Upload link</a>
+                        <a asp-page="/GenerateLink" asp-route-staffId="@staff.Id" asp-route-linkType="terms" class="btn btn-sm btn-outline-secondary">Terms link</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

@@ -1,0 +1,37 @@
+@page
+@model LoginModel
+@{
+    ViewData["Title"] = "Login";
+}
+
+<div class="row justify-content-center">
+    <div class="col-md-4">
+        <h1>Login</h1>
+
+        @if (Model.ErrorMessage is not null)
+        {
+            <div class="alert alert-danger">@Model.ErrorMessage</div>
+        }
+
+        <form method="post">
+            @if (Model.ChallengeToken is not null)
+            {
+                <input type="hidden" asp-for="ChallengeToken" />
+                <label asp-for="Code" class="form-label">Email verification code</label>
+                <input asp-for="Code" class="form-control mb-3" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required />
+            }
+            else
+            {
+            <div class="mb-3">
+                <label asp-for="Email" class="form-label">Email</label>
+                <input asp-for="Email" class="form-control" autocomplete="username" required />
+            </div>
+            <div class="mb-3">
+                <label for="password" class="form-label">Password</label>
+                <input type="password" class="form-control" id="password" name="Password" autocomplete="current-password" required />
+            </div>
+            }
+            <button type="submit" class="btn btn-primary">Sign in</button>
+        </form>
+    </div>
+</div>

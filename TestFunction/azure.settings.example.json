@@ -1,0 +1,20 @@
+{
+  "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+  "AZURE_FUNCTIONS_ENVIRONMENT": "Production",
+  "ConnectionStrings__DefaultConnection": "Server=tcp:<SQL_SERVER>.database.windows.net,1433;Database=<DATABASE>;Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;",
+  "ApiAuth__TenantId": "<TENANT_GUID>",
+  "ApiAuth__Audience": "<API_APPLICATION_CLIENT_ID>",
+  "ApiAuth__AllowedClientId": "<FRONTEND_MANAGED_IDENTITY_CLIENT_ID>",
+  "ApiAuth__AllowUnauthenticatedLocalRequests": "false",
+  "Azure__ManagedIdentityClientId": "",
+  "AzureStorage__ServiceUri": "https://<STORAGE_ACCOUNT>.blob.core.windows.net",
+  "ProcessingStorage__blobServiceUri": "https://<STORAGE_ACCOUNT>.blob.core.windows.net",
+  "ProcessingStorage__queueServiceUri": "https://<STORAGE_ACCOUNT>.queue.core.windows.net",
+  "ProcessingStorage__credential": "managedidentity",
+  "AzureWebJobsStorage__accountName": "<HOST_STORAGE_ACCOUNT>",
+  "AzureWebJobsStorage__credential": "managedidentity",
+  "UploadsContainer": "uploads",
+  "Email__Endpoint": "https://<ACS_RESOURCE>.communication.azure.com",
+  "Email__Sender": "<VERIFIED_ACS_SENDER_ADDRESS>",
+  "Vision__Endpoint": "https://<VISION_RESOURCE>.cognitiveservices.azure.com/"
+}

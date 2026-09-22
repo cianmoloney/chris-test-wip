@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <data name="Registration" xml:space="preserve"><value>Реєстрація працівника</value></data>
+  <data name="InvalidLink" xml:space="preserve"><value>Посилання недійсне, прострочене або вже використане. Попросіть нове посилання.</value></data>
+  <data name="FirstName" xml:space="preserve"><value>Ім’я</value></data>
+  <data name="LastName" xml:space="preserve"><value>Прізвище</value></data>
+  <data name="Email" xml:space="preserve"><value>Електронна пошта</value></data>
+  <data name="Phone" xml:space="preserve"><value>Номер телефону</value></data>
+  <data name="Role" xml:space="preserve"><value>Посада</value></data>
+  <data name="SelectRole" xml:space="preserve"><value>Виберіть посаду</value></data>
+  <data name="StaffType" xml:space="preserve"><value>Тип зайнятості</value></data>
+  <data name="SelectType" xml:space="preserve"><value>Виберіть тип зайнятості</value></data>
+  <data name="RequiredDocuments" xml:space="preserve"><value>Обов’язкові документи</value></data>
+  <data name="Register" xml:space="preserve"><value>Зареєструватися</value></data>
+  <data name="Upload" xml:space="preserve"><value>Надіслати</value></data>
+  <data name="UploadTitle" xml:space="preserve"><value>Надіслати документ</value></data>
+  <data name="DocumentType" xml:space="preserve"><value>Тип документа (необов’язково)</value></data>
+  <data name="Terms" xml:space="preserve"><value>Умови та положення</value></data>
+  <data name="AgreeLabel" xml:space="preserve"><value>Я прочитав(-ла) та приймаю ці умови</value></data>
+  <data name="Agree" xml:space="preserve"><value>Прийняти</value></data>
+  <data name="Accepted" xml:space="preserve"><value>Згоду записано: {0} UTC.</value></data>
+  <data name="NoTerms" xml:space="preserve"><value>Умови недоступні. Зверніться до відділу кадрів.</value></data>
+  <data name="RegistrationComplete" xml:space="preserve"><value>Реєстрацію завершено</value></data>
+  <data name="Registered" xml:space="preserve"><value>Ваші дані збережено.</value></data>
+  <data name="UploadComplete" xml:space="preserve"><value>Надсилання завершено</value></data>
+  <data name="Uploaded" xml:space="preserve"><value>Ваш документ отримано для перевірки.</value></data>
+  <data name="Failure" xml:space="preserve"><value>Не вдалося виконати запит. Перевірте дані та спробуйте ще раз або зверніться до відділу кадрів.</value></data>
+  <data name="The {0} field is required." xml:space="preserve"><value>Поле {0} є обов’язковим.</value></data>
+  <data name="The {0} field is not a valid e-mail address." xml:space="preserve"><value>Введіть дійсну адресу електронної пошти.</value></data>
+</root>

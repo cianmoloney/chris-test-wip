@@ -1,4 +1,5 @@
 <Solution>
+  <Folder Name="/obj/" />
   <Folder Name="/Solution Items/">
     <File Path="Spec.md" />
   </Folder>
@@ -7,5 +8,7 @@
     <Deploy />
   </Project>
   <Project Path="TestFunction/TestFunction.csproj" Id="37234193-eb50-41d1-82ec-625a4c21df63" />
-  <Project Path="TestSolution/TestSolution.csproj" />
+  <Project Path="TestFrontend/TestFrontend.csproj" />
+  <Project Path="TestShared/TestShared.csproj" />
+  <Project Path="TestFunction.Tests/TestFunction.Tests.csproj" />
 </Solution>

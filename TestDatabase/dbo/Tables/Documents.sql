@@ -5,7 +5,16 @@
 CREATE TABLE [dbo].[Documents]
 (
     [Id]             INT IDENTITY (1, 1) NOT NULL CONSTRAINT [PK_Documents] PRIMARY KEY,
+    [Name]           NVARCHAR (512) NOT NULL CONSTRAINT [DF_Documents_Name] DEFAULT (N''),
+    [DocumentTypeId] INT NULL CONSTRAINT [FK_Documents_DocumentTypes] REFERENCES [dbo].[DocumentTypes] ([Id]) ON DELETE SET NULL,
     [BlobName]       NVARCHAR (512)      NULL,
+    [ContainerName] NVARCHAR(63) NULL,
+    [ScanPassed] BIT NOT NULL CONSTRAINT [DF_Documents_ScanPassed] DEFAULT (0),
+    [ProcessingCompletedAt] DATETIMEOFFSET NULL,
+    [LastProcessingAttempt] DATETIMEOFFSET NULL,
+    [Issue] NVARCHAR(512) NULL,
+    [IsArchived] BIT NOT NULL CONSTRAINT [DF_Documents_IsArchived] DEFAULT (0),
+    [RowVersion] ROWVERSION NOT NULL,
     [DocumentType]   NVARCHAR (128)      NULL,
     [DocumentNumber] NVARCHAR (128)      NULL,
     [ExtractedName]  NVARCHAR (256)      NULL,
@@ -30,3 +39,6 @@ CREATE INDEX [IX_Documents_BlobName] ON [dbo].[Documents] ([BlobName]);
 GO
 
 CREATE INDEX [IX_Documents_StaffId] ON [dbo].[Documents] ([StaffId]);
+GO
+CREATE UNIQUE INDEX [IX_Documents_ContainerName_BlobName] ON [dbo].[Documents] ([ContainerName], [BlobName])
+WHERE [ContainerName] IS NOT NULL AND [BlobName] IS NOT NULL;

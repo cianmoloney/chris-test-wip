@@ -1,0 +1,13 @@
+@page
+@model TestFrontend.Pages.ManageTermsModel
+@{ ViewData["Title"] = "Terms editions"; }
+<h1>Terms editions</h1>
+<form method="post" class="row g-3">
+    <div asp-validation-summary="All" class="text-danger"></div>
+    <div class="col-md-6"><label asp-for="Input.TermsDocumentId" class="form-label">Terms document</label><select asp-for="Input.TermsDocumentId" class="form-select"><option value="">New document</option>@foreach (var terms in Model.Terms) { <option value="@terms.Id">@terms.Title</option> }</select></div>
+    <div class="col-md-6"><label asp-for="Input.Title" class="form-label">Title</label><input asp-for="Input.Title" class="form-control" /></div>
+    <div><label asp-for="Input.English" class="form-label">English</label><textarea asp-for="Input.English" class="form-control" rows="8"></textarea></div>
+    <div><label asp-for="Input.Polish" class="form-label">Polish</label><textarea asp-for="Input.Polish" class="form-control" rows="8"></textarea></div>
+    <div><label asp-for="Input.Ukrainian" class="form-label">Ukrainian</label><textarea asp-for="Input.Ukrainian" class="form-control" rows="8"></textarea></div>
+    <div><button class="btn btn-primary" type="submit">Publish new edition and require reacceptance</button></div>
+</form>

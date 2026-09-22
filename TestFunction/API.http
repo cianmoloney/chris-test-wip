@@ -1,0 +1,177 @@
+@baseUrl = http://localhost:7024/api
+@token = REPLACE_WITH_APPLICATION_ACCESS_TOKEN_OR_ENABLE_LOCAL_BYPASS
+@staffId = 1
+@documentId = 1
+@termsVersionId = 1
+@session = REPLACE_WITH_USER_SESSION
+@linkToken = REPLACE_WITH_ISSUED_LINK
+
+### Sign in; use the returned token as session only when requiresMfa is false
+POST {{baseUrl}}/accounts/login
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "email": "REPLACE_WITH_ACCOUNT_EMAIL", "password": "REPLACE_WITH_PASSWORD_IN_PRIVATE_LOCAL_CONFIGURATION" }
+
+### Complete optional MFA; the returned token is the new office session
+POST {{baseUrl}}/accounts/mfa
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "challenge": "REPLACE_WITH_CHALLENGE", "code": "REPLACE_WITH_EMAIL_CODE" }
+
+### Lookups
+GET {{baseUrl}}/lookups
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Filter and sort staff
+GET {{baseUrl}}/staff?filter=Smith&sortBy=registered
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Register a staff member (201; duplicate email returns 409)
+POST {{baseUrl}}/staff
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{
+  "firstName": "Alex",
+  "lastName": "Smith",
+  "email": "alex.smith@example.test",
+  "phoneNumber": "+35312345678",
+  "staffTypeId": 1,
+  "staffRoleId": 1
+}
+
+### Staff detail including documents and terms history
+GET {{baseUrl}}/staff/{{staffId}}
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Update staff (204)
+PUT {{baseUrl}}/staff/{{staffId}}
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{
+  "firstName": "Alex",
+  "lastName": "Smith",
+  "email": "alex.smith@example.test",
+  "phoneNumber": "+35312345678",
+  "staffRoleId": 1
+}
+
+### Documents awaiting review
+GET {{baseUrl}}/documents?status=pending
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Edit a document (204)
+PUT {{baseUrl}}/documents/{{documentId}}
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{
+  "name": "Safe Pass certificate",
+  "documentTypeId": 1,
+  "documentNumber": "SP-12345",
+  "email": "alex.smith@example.test",
+  "phone": "+35312345678",
+  "startDate": "2026-01-01T00:00:00Z",
+  "expiryDate": "2027-01-01T00:00:00Z",
+  "staffId": {{staffId}}
+}
+
+### Reassign a document without changing its metadata (204; requires Documents.Write)
+PUT {{baseUrl}}/documents/{{documentId}}/staff
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "staffId": {{staffId}} }
+
+### Unlink a document from its staff member (204)
+PUT {{baseUrl}}/documents/{{documentId}}/staff
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "staffId": null }
+
+### Validate a document (204)
+PUT {{baseUrl}}/documents/{{documentId}}/status
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "status": "Validated" }
+
+### Staff-owned download metadata (404 for another staff member's document)
+GET {{baseUrl}}/staff/{{staffId}}/documents/{{documentId}}
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Edit a staff-owned document (204)
+PUT {{baseUrl}}/staff/{{staffId}}/documents/{{documentId}}
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{
+  "documentTypeId": 1,
+  "documentNumber": "SP-12345",
+  "startDate": "2026-01-01T00:00:00Z",
+  "expiryDate": "2027-01-01T00:00:00Z"
+}
+
+### Current terms in Polish (falls back to English)
+GET {{baseUrl}}/staff/{{staffId}}/terms?language=pl
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Record worker agreement to the displayed, link-scoped terms version
+POST {{baseUrl}}/public/accept
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "token": "{{linkToken}}", "termsDocumentVersionId": {{termsVersionId}}, "agree": true }
+
+### Missing staff (404)
+GET {{baseUrl}}/staff/2147483647
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Invalid status (400)
+PUT {{baseUrl}}/documents/{{documentId}}/status
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "status": 99 }
+
+### Missing bearer token (401 when local bypass is off)
+GET {{baseUrl}}/staff
+
+### Issue a generic one-use upload link
+POST {{baseUrl}}/links
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "purpose": "upload", "staffId": null, "termsDocumentId": null, "validHours": 24 }
+
+### Resolve a worker upload link without an office session
+POST {{baseUrl}}/public/resolve
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "token": "{{linkToken}}", "purpose": "upload", "language": "pl" }
+
+### Archive a document while retaining its history
+DELETE {{baseUrl}}/documents/{{documentId}}
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}

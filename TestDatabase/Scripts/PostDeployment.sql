@@ -22,13 +22,6 @@ BEGIN
     SET IDENTITY_INSERT dbo.Roles OFF;
 END;
 
-BEGIN
-    SET IDENTITY_INSERT dbo.Staff ON;
-    INSERT INTO dbo.Staff (Id, Email, PasswordHash, Phone, RoleId, DateCteated, IsEnabled, MfaEnabled)
-    VALUES (1, 'cianmoloney05@gmail.com', 'pass', '0879752908', 2, SYSUTCDATETIME(), 1, 0);
-    SET IDENTITY_INSERT dbo.Staff OFF;
-END;
-
 
 -- Seed a default terms document with one version per language if none exist yet.
 IF NOT EXISTS (SELECT 1 FROM dbo.TermsDocuments)
@@ -48,49 +41,33 @@ BEGIN
 END;
 
 
--- 2. Staff roles (one role per staff member for now).
-CREATE TABLE dbo.StaffRoles
-(
-    Id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_StaffRoles PRIMARY KEY,
-    Name NVARCHAR(128) NOT NULL,
-    CONSTRAINT UQ_StaffRoles_Name UNIQUE (Name)
-);
+INSERT INTO dbo.StaffRoles (Name)
+SELECT source.Name FROM (VALUES (N'Driver'), (N'Carpenter'), (N'Electrician')) source(Name)
+WHERE NOT EXISTS (SELECT 1 FROM dbo.StaffRoles target WHERE target.Name = source.Name);
 
-INSERT INTO dbo.StaffRoles (Name) VALUES (N'Driver'), (N'Carpenter'), (N'Electrician');
+INSERT INTO dbo.DocumentTypes (Name)
+SELECT source.Name FROM (VALUES (N'Safe Pass'), (N'Forklift')) source(Name)
+WHERE NOT EXISTS (SELECT 1 FROM dbo.DocumentTypes target WHERE target.Name = source.Name);
 
-ALTER TABLE dbo.Staff ADD StaffRoleId INT NULL
-    CONSTRAINT FK_Staff_StaffRoles FOREIGN KEY REFERENCES dbo.StaffRoles(Id) ON DELETE SET NULL;
-
--- The old free-text Role column is superseded by StaffRoleId.
-ALTER TABLE dbo.Staff DROP COLUMN Role;
-
--- 3. Document types (e.g. Safe Pass, Forklift).
-CREATE TABLE dbo.DocumentTypes
-(
-    Id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_DocumentTypes PRIMARY KEY,
-    Name NVARCHAR(128) NOT NULL,
-    CONSTRAINT UQ_DocumentTypes_Name UNIQUE (Name)
-);
-
-INSERT INTO dbo.DocumentTypes (Name) VALUES (N'Safe Pass'), (N'Forklift');
-
-ALTER TABLE dbo.Documents ADD DocumentTypeId INT NULL
-    CONSTRAINT FK_Documents_DocumentTypes FOREIGN KEY REFERENCES dbo.DocumentTypes(Id) ON DELETE SET NULL;
-
--- 4. One role can require many document types (and vice versa).
--- A staff member is expected to upload ALL documents for their role.
-CREATE TABLE dbo.StaffRoleDocumentTypes
-(
-    StaffRoleId INT NOT NULL
-        CONSTRAINT FK_StaffRoleDocumentTypes_StaffRoles FOREIGN KEY REFERENCES dbo.StaffRoles(Id) ON DELETE CASCADE,
-    DocumentTypeId INT NOT NULL
-        CONSTRAINT FK_StaffRoleDocumentTypes_DocumentTypes FOREIGN KEY REFERENCES dbo.DocumentTypes(Id) ON DELETE CASCADE,
-    CONSTRAINT PK_StaffRoleDocumentTypes PRIMARY KEY (StaffRoleId, DocumentTypeId)
-);
-
--- Example: drivers require a Safe Pass and a Forklift licence.
 INSERT INTO dbo.StaffRoleDocumentTypes (StaffRoleId, DocumentTypeId)
-SELECT r.Id, t.Id
-FROM dbo.StaffRoles r
-CROSS JOIN dbo.DocumentTypes t
-WHERE r.Name = N'Driver';
+SELECT role.Id, documentType.Id FROM dbo.StaffRoles role CROSS JOIN dbo.DocumentTypes documentType
+WHERE role.Name = N'Driver' AND documentType.Name IN (N'Safe Pass', N'Forklift')
+AND NOT EXISTS (SELECT 1 FROM dbo.StaffRoleDocumentTypes target
+                WHERE target.StaffRoleId = role.Id AND target.DocumentTypeId = documentType.Id);
+
+UPDATE dbo.Documents SET Name = COALESCE(BlobName, N'Document') WHERE Name = N'';
+UPDATE dbo.Documents SET ContainerName = N'$(LegacyUploadsContainer)' WHERE ContainerName IS NULL AND BlobName IS NOT NULL;
+INSERT INTO dbo.StaffRoles (Name)
+SELECT DISTINCT staff.Role FROM dbo.Staff staff
+WHERE staff.Role IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.StaffRoles role WHERE role.Name = staff.Role);
+UPDATE staff SET StaffRoleId = role.Id FROM dbo.Staff staff JOIN dbo.StaffRoles role ON role.Name = staff.Role
+WHERE staff.StaffRoleId IS NULL;
+UPDATE dbo.StaffTypes SET Name = N'Contract' WHERE Name = N'External';
+
+INSERT INTO dbo.Responsibilities (RoleId, Name, IsEnabled)
+SELECT role.Id, permission.Name, 1
+FROM dbo.Roles role
+CROSS JOIN (VALUES (N'Staff.Read'), (N'Staff.Write'), (N'Documents.Write'), (N'Documents.Validate'),
+                   (N'Links.Write'), (N'Users.Write'), (N'Terms.Write')) permission(Name)
+WHERE (role.Name IN (N'HR', N'Admin') OR (role.Name = N'Foreman' AND permission.Name IN (N'Staff.Read', N'Documents.Validate', N'Links.Write')))
+AND NOT EXISTS (SELECT 1 FROM dbo.Responsibilities target WHERE target.RoleId = role.Id AND target.Name = permission.Name);

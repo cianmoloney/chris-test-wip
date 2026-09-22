@@ -1,0 +1,230 @@
+@page "{id:int}"
+@model StaffMemberModel
+@using TestShared
+@using Microsoft.AspNetCore.Mvc.Rendering
+@{
+    ViewData["Title"] = "Staff Member";
+}
+
+<h1>@Model.Input.FirstName @Model.Input.LastName</h1>
+
+@if (Model.Staff?.StaffId is not null)
+{
+    <p class="text-muted">Staff ID: <strong>@Model.Staff.StaffId</strong> (@(Model.Staff.StaffType?.Name ?? "Unknown type"))</p>
+}
+
+@if (Model.StatusMessage is not null)
+{
+    <div class="alert alert-warning">@Model.StatusMessage</div>
+}
+
+<a asp-page="/Staff" class="btn btn-outline-secondary mb-3">Back to staff</a>
+
+<h2>Details</h2>
+@if (Model.Readiness is { } readiness)
+{
+    <p class="fw-bold">@(readiness.IsReady ? "Ready for work" : "Not ready for work")</p>
+    @foreach (var reason in readiness.Reasons) { <p class="text-danger">@reason</p> }
+}
+
+<form method="post" class="col-md-6 mb-4">
+    <fieldset disabled="@(!User.HasClaim("permission", Permissions.StaffWrite))">
+    <div class="mb-3"><label asp-for="Input.StaffTypeId" class="form-label">Staff type</label>
+        <select asp-for="Input.StaffTypeId" class="form-select" asp-items="@(new SelectList(Model.StaffTypes, "Id", "Name"))"></select>
+    </div>
+    <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+    <div class="mb-3">
+        <label asp-for="Input.FirstName" class="form-label">First name</label>
+        <input asp-for="Input.FirstName" class="form-control" />
+        <span asp-validation-for="Input.FirstName" class="text-danger"></span>
+    </div>
+    <div class="mb-3">
+        <label asp-for="Input.LastName" class="form-label">Last name</label>
+        <input asp-for="Input.LastName" class="form-control" />
+        <span asp-validation-for="Input.LastName" class="text-danger"></span>
+    </div>
+    <div class="mb-3">
+        <label asp-for="Input.Email" class="form-label">Email</label>
+        <input asp-for="Input.Email" class="form-control" />
+        <span asp-validation-for="Input.Email" class="text-danger"></span>
+    </div>
+    <div class="mb-3">
+        <label asp-for="Input.PhoneNumber" class="form-label">Phone number</label>
+        <input asp-for="Input.PhoneNumber" class="form-control" />
+        <span asp-validation-for="Input.PhoneNumber" class="text-danger"></span>
+    </div>
+    <div class="mb-3">
+        <label asp-for="Input.StaffRoleId" class="form-label">Role</label>
+        <select asp-for="Input.StaffRoleId" class="form-select"
+                asp-items="@(new SelectList(Model.StaffRoles, "Id", "Name"))">
+            <option value="">— No role —</option>
+        </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+    </fieldset>
+</form>
+@if (User.HasClaim("permission", Permissions.StaffWrite))
+{
+    <form method="post" asp-page-handler="Archive" asp-route-id="@Model.Staff?.Id" class="mb-3">
+        <button class="btn btn-outline-danger" type="submit">Archive staff member</button>
+    </form>
+}
+
+<h2>Documents</h2>
+
+@if (Model.MissingDocumentTypes.Count > 0)
+{
+    <div class="alert alert-warning">
+        <strong>Missing required documents for role @(Model.Staff?.StaffRole?.Name):</strong>
+        @string.Join(", ", Model.MissingDocumentTypes.Select(t => t.Name))
+    </div>
+}
+
+@if (Model.Documents.Count == 0)
+{
+    <p class="text-muted">No documents are associated with this staff member.</p>
+}
+else
+{
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Number</th>
+                <th>Start Date</th>
+                <th>Expiry Date</th>
+                <th>Status</th>
+                <th>Uploaded</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var document in Model.Documents)
+            {
+                <tr>
+                    <td>@document.Name</td>
+                    <td>@(document.Type?.Name ?? document.DocumentType ?? "—")</td>
+                    <td>@(document.DocumentNumber ?? "—")</td>
+                    <td>@(document.StartDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                    <td>@(document.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                    <td>
+                        @switch (document.Status)
+                        {
+                            case DocumentStatus.Validated:
+                                <span class="badge bg-success">Validated</span>
+                                break;
+                            case DocumentStatus.Rejected:
+                                <span class="badge bg-danger">Rejected</span>
+                                break;
+                            case DocumentStatus.ParseFailed:
+                                <span class="badge bg-secondary">Parse failed</span>
+                                break;
+                            default:
+                                <span class="badge bg-warning text-dark">Pending review</span>
+                                break;
+                        }
+                    </td>
+                    <td>@document.Timestamp.ToLocalTime().ToString("g")</td>
+                    <td>
+                        @if (document.ScanPassed && !string.IsNullOrWhiteSpace(document.Name))
+                        {
+                            <a class="btn btn-sm btn-outline-primary"
+                               asp-page="/StaffMember" asp-page-handler="Download"
+                               asp-route-id="@document.StaffId" asp-route-documentId="@document.Id">
+                                Download
+                            </a>
+                        }
+                        <button class="btn btn-sm btn-outline-secondary" type="button"
+                            disabled="@(!User.HasClaim("permission", Permissions.DocumentsWrite))"
+                                data-bs-toggle="collapse" data-bs-target="#edit-@document.Id"
+                                aria-expanded="false" aria-controls="edit-@document.Id">
+                            Edit
+                        </button>
+                    </td>
+                </tr>
+                <tr class="collapse" id="edit-@document.Id">
+                    <td colspan="8">
+                        <form method="post" asp-page-handler="UpdateDocument" asp-route-id="@document.StaffId" class="row g-2 align-items-end">
+                            <input type="hidden" name="documentId" value="@document.Id" />
+                            <div class="col-md-3">
+                                <label class="form-label">Type</label>
+                                <select name="documentTypeId" class="form-select form-select-sm">
+                                    <option value="">— Select type —</option>
+                                    @foreach (var type in Model.DocumentTypesList)
+                                    {
+                                        <option value="@type.Id" selected="@(document.DocumentTypeId == type.Id)">@type.Name</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Number</label>
+                                <input type="text" name="documentNumber" class="form-control form-control-sm" value="@document.DocumentNumber" />
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Start</label>
+                                <input type="date" name="startDate" class="form-control form-control-sm" value="@document.StartDate?.ToString("yyyy-MM-dd")" />
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Expiry</label>
+                                <input type="date" name="expiryDate" class="form-control form-control-sm" value="@document.ExpiryDate?.ToString("yyyy-MM-dd")" />
+                            </div>
+                            <div class="col-md-2">
+                                <button type="submit" class="btn btn-sm btn-primary">Save changes</button>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2>Agreements</h2>
+
+@if (Model.Agreements.Count == 0)
+{
+    <p class="text-muted">This staff member has not agreed to any terms.</p>
+}
+else
+{
+    <table class="table table-hover">
+        <thead>
+            <tr>
+                <th>Terms</th>
+                <th>Version</th>
+                <th>Language</th>
+                <th>Status</th>
+                <th>Terms created</th>
+                <th>Accepted</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var agreement in Model.Agreements)
+            {
+                var version = agreement.TermsDocumentVersion;
+                <tr>
+                    <td>@version.TermsDocument.Title</td>
+                    <td>@version.Version</td>
+                    <td>@version.Language</td>
+                    <td>
+                        @if (version.IsActive)
+                        {
+                            <span class="badge bg-success">Current</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Superseded</span>
+                        }
+                    </td>
+                    <td>@version.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                    <td>@agreement.AcceptedAt.ToLocalTime().ToString("g")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

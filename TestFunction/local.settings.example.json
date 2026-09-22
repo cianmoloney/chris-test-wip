@@ -1,0 +1,22 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "AzureWebJobs.ProcessUploadedBlob.Disabled": "true",
+    "AzureWebJobs.RetryPendingUploads.Disabled": "true",
+    "AzureWebJobs.ExpiryCheck.Disabled": "true",
+    "UploadsContainer": "uploads",
+    "ProcessingStorage": "UseDevelopmentStorage=true",
+    "AzureStorage__ServiceUri": "https://christestswesa.blob.core.windows.net",
+    "Email__Endpoint": "https://<ACS_RESOURCE>.communication.azure.com",
+    "Email__Sender": "<VERIFIED_ACS_SENDER_ADDRESS>",
+    "Vision__Endpoint": "https://chris-test-cv.cognitiveservices.azure.com/",
+    "ConnectionStrings__DefaultConnection": "Server=chris-test-sql.database.windows.net;Database=chris-test-db;Integrated Security=true;TrustServerCertificate=true;",
+    "ApiAuth__TenantId": "<tenant-guid>",
+    "ApiAuth__Audience": "<api-application-client-id>",
+    "ApiAuth__AllowedClientId": "<frontend-managed-identity-client-id>",
+    "ApiAuth__AllowUnauthenticatedLocalRequests": "false"
+  }
+}

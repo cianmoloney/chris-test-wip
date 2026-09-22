@@ -1,0 +1,164 @@
+@page
+@using TestShared
+@model DocumentsModel
+@{
+    ViewData["Title"] = "Document Explorer";
+}
+
+<h1>Document Explorer</h1>
+
+@if (Model.StatusMessage is not null)
+{
+    <div class="alert alert-warning">@Model.StatusMessage</div>
+}
+
+<form method="get" class="mb-3 d-flex gap-2 flex-wrap">
+    <input asp-for="Filter" class="form-control w-auto" placeholder="Name, staff, type or number" aria-label="Document filter" />
+    <select asp-for="SortBy" class="form-select w-auto" aria-label="Document sort"><option value="">Newest first</option><option value="name">Name</option><option value="expiry">Expiry</option><option value="staff">Staff</option></select>
+    <select asp-for="StatusFilter" class="form-select w-auto">
+        <option value="">All statuses</option>
+        <option value="pending">Pending review</option>
+        <option value="failed">Parse failed</option>
+        <option value="validated">Validated</option>
+        <option value="rejected">Rejected</option>
+        <option value="scanning">Awaiting scan</option>
+        <option value="unsafe">Quarantined</option>
+    </select>
+    <button type="submit" class="btn btn-primary">Apply</button>
+</form>
+
+@if (Model.Documents.Count == 0)
+{
+    <p class="text-muted">No documents found.</p>
+}
+else
+{
+    @foreach (var doc in Model.Documents)
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <h5 class="card-title mb-2">
+                        @(string.IsNullOrEmpty(doc.Name) ? "(unparsed)" : doc.Name)
+                        <span class="badge @(doc.Status switch { DocumentStatus.Validated => "bg-success", DocumentStatus.Rejected => "bg-danger", DocumentStatus.ParseFailed => "bg-danger", _ => "bg-warning text-dark" })">
+                            @doc.Status
+                        </span>
+                    </h5>
+                    <small class="text-muted">Uploaded @doc.Timestamp.ToLocalTime().ToString("g")</small>
+                </div>
+
+                @if (doc.Issue is not null) { <p class="text-warning">@doc.Issue</p> }
+                @if (doc.ScanPassed && !string.IsNullOrWhiteSpace(doc.BlobName) && !string.IsNullOrWhiteSpace(doc.ContainerName))
+                {
+                    <p class="mb-2">
+                        <a class="btn btn-sm btn-outline-primary" asp-page="/Files" asp-page-handler="Download" asp-route-blobName="@doc.BlobName" asp-route-containerName="@doc.ContainerName">Download</a>
+                    </p>
+                }
+                else
+                {
+                    <p class="mb-2 d-flex gap-2 align-items-center flex-wrap">
+                        <button type="button" class="btn btn-sm btn-outline-primary" disabled aria-describedby="download-status-@doc.Id">Download</button>
+                        <span id="download-status-@doc.Id" class="small text-muted">@(doc.Status == DocumentStatus.Unsafe ? "Download blocked: file quarantined." : !doc.ScanPassed ? "Awaiting safety scan." : "File unavailable.")</span>
+                    </p>
+                }
+
+                @if (!string.IsNullOrEmpty(doc.ExtractedName))
+                {
+                    <p class="mb-2 text-muted">Extracted holder: @doc.ExtractedName</p>
+                }
+
+                @if (doc.Staff is not null)
+                {
+                    <p class="mb-2">
+                        Linked staff member:
+                        <a asp-page="/StaffMember" asp-route-id="@doc.Staff.Id">@doc.Staff.LastName, @doc.Staff.FirstName</a>
+                    </p>
+                }
+
+                <form method="post" asp-page-handler="Reassign" asp-route-statusFilter="@Model.StatusFilter" asp-route-filter="@Model.Filter" asp-route-sortBy="@Model.SortBy" class="mb-3">
+                    <input type="hidden" name="id" value="@doc.Id" />
+                    <fieldset disabled="@(!User.HasClaim("permission", Permissions.DocumentsWrite))">
+                        <label for="staff-@doc.Id" class="form-label">Staff member</label>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-6">
+                                <select id="staff-@doc.Id" name="staffId" class="form-select">
+                                    <option value="">Unlinked</option>
+                                    @foreach (var staff in Model.StaffList)
+                                    {
+                                        <option value="@staff.Id" selected="@(doc.StaffId == staff.Id)">@staff.LastName, @staff.FirstName (@(staff.StaffId ?? staff.StaffNumber.ToString()))</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-auto">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">Reassign staff</button>
+                            </div>
+                        </div>
+                    </fieldset>
+                    @if (!User.HasClaim("permission", Permissions.DocumentsWrite))
+                    {
+                        <p class="small text-muted mt-1 mb-0">Staff reassignment requires document editing permission.</p>
+                    }
+                </form>
+
+                <form method="post" asp-page-handler="Update" asp-route-statusFilter="@Model.StatusFilter" class="row g-2 align-items-end mb-2">
+                    <fieldset class="row g-2" disabled="@(!User.HasClaim("permission", Permissions.DocumentsWrite))">
+                    <input type="hidden" name="id" value="@doc.Id" />
+                    <input type="hidden" name="staffId" value="@doc.StaffId" />
+                    <div class="col-md-2">
+                        <label class="form-label">Name</label>
+                        <input type="text" name="name" class="form-control" value="@doc.Name" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Type</label>
+                        <select name="documentTypeId" class="form-select">
+                            <option value="">— Select type —</option>
+                            @foreach (var type in Model.DocumentTypesList)
+                            {
+                                <option value="@type.Id" selected="@(doc.DocumentTypeId == type.Id)">@type.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Number</label>
+                        <input type="text" name="documentNumber" class="form-control" value="@doc.DocumentNumber" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Email</label>
+                        <input type="text" name="email" class="form-control" value="@doc.Email" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Phone</label>
+                        <input type="text" name="phone" class="form-control" value="@doc.Phone" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Start</label>
+                        <input type="date" name="startDate" class="form-control" value="@doc.StartDate?.ToString("yyyy-MM-dd")" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Expiry</label>
+                        <input type="date" name="expiryDate" class="form-control" value="@doc.ExpiryDate?.ToString("yyyy-MM-dd")" />
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Save changes</button>
+                    </div>
+                    </fieldset>
+                </form>
+
+                <form method="post" asp-page-handler="SetStatus" asp-route-statusFilter="@Model.StatusFilter" class="d-inline">
+                    <input type="hidden" name="id" value="@doc.Id" />
+                    <input type="hidden" name="status" value="@((int)DocumentStatus.Validated)" />
+                    <button type="submit" class="btn btn-sm btn-success" disabled="@(!doc.ScanPassed || !User.HasClaim("permission", Permissions.DocumentsValidate))">Validate</button>
+                </form>
+                <form method="post" asp-page-handler="SetStatus" asp-route-statusFilter="@Model.StatusFilter" class="d-inline">
+                    <input type="hidden" name="id" value="@doc.Id" />
+                    <input type="hidden" name="status" value="@((int)DocumentStatus.Rejected)" />
+                    <button type="submit" class="btn btn-sm btn-outline-danger" disabled="@(!User.HasClaim("permission", Permissions.DocumentsValidate))">Reject</button>
+                </form>
+                @if (User.HasClaim("permission", Permissions.DocumentsWrite))
+                {
+                    <form method="post" asp-page-handler="Archive" class="mt-3"><input type="hidden" name="id" value="@doc.Id" /><button class="btn btn-sm btn-outline-danger" type="submit">Archive</button></form>
+                }
+            </div>
+        </div>
+    }
+}

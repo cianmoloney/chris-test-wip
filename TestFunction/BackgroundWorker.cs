@@ -12,279 +12,207 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using UglyToad.PdfPig;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using TestFunction.Data;
+using TestFunction.Services;
+using TestShared;
 
 namespace TestFunction;
 
-public class BackgroundWorker
+public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEmailService email,
+    IConfiguration configuration, TimeProvider clock, ILogger<BackgroundWorker> logger)
 {
-    private readonly ILogger _logger;
+    private readonly ILogger _logger = logger;
 
-    public BackgroundWorker(ILoggerFactory loggerFactory)
+    [Function("ExpiryCheck")]
+    [FixedDelayRetry(3, "00:05:00")]
+    public async Task ExpiryCheck([TimerTrigger("0 0 5 * * *")] TimerInfo timer, CancellationToken cancellationToken)
     {
-        _logger = loggerFactory.CreateLogger<BackgroundWorker>();
-    }
-
-    // Same connection strings as the website (appsettings.json).
-    private static string SqlConnectionString =>
-        Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
-            ?? throw new InvalidOperationException("ConnectionStrings__DefaultConnection is not configured.");
-
-    private static string StorageConnectionString =>
-        Environment.GetEnvironmentVariable("AzureStorage__ConnectionString")
-            ?? throw new InvalidOperationException("AzureStorage__ConnectionString is not configured.");
-
-    private static string StorageContainerName =>
-        Environment.GetEnvironmentVariable("AzureStorage__ContainerName") ?? "uploads";
-
-    // Runs every morning at 5:00 AM. Checks the ExpiryDate column in the
-    // Documents table and sends a collated email for entries expiring within a week.
-   // [Function("ExpiryCheck")]
-    public async Task ExpiryCheck([TimerTrigger("0 0 5 * * *")] TimerInfo myTimer)
-    {
-        _logger.LogInformation("Expiry check executed at: {executionTime}", DateTime.UtcNow);
-
-        var expiring = new StringBuilder();
-        var count = 0;
-
-        await using var connection = new SqlConnection(SqlConnectionString);
-        await connection.OpenAsync();
-
-        const string query = """
-            SELECT Name, DocumentType, ExpiryDate
-            FROM dbo.Documents
-            WHERE ExpiryDate >= SYSDATETIMEOFFSET()
-              AND ExpiryDate <= DATEADD(day, 7, SYSDATETIMEOFFSET())
-            ORDER BY ExpiryDate;
-            """;
-
-        await using (var command = new SqlCommand(query, connection))
-        await using (var reader = await command.ExecuteReaderAsync())
+        var now = clock.GetUtcNow();
+        var documents = await database.Documents.AsNoTracking().Include(document => document.Staff).Include(document => document.Type)
+            .Where(document => document.Staff != null && !document.Staff.IsArchived && document.IsValid && document.Status == DocumentStatus.Validated && document.ScanPassed)
+            .ToListAsync(cancellationToken);
+        var expiring = documents.Where(document => document.ExpiryDate is not null
+            && document.ExpiryDate.Value.UtcDateTime.Date >= now.UtcDateTime.Date
+            && document.ExpiryDate.Value.UtcDateTime.Date <= now.UtcDateTime.Date.AddDays(7)
+            && !documents.Any(replacement => IsReplacement(document, replacement))).ToList();
+        if (expiring.Count == 0) return;
+        var recipients = await database.Users.Where(user => user.IsEnabled && user.Role!.Name == "HR").ToListAsync(cancellationToken);
+        var text = string.Join("\n", expiring.Select(document =>
+            $"{document.Staff!.FirstName} {document.Staff.LastName}: {document.Type?.Name ?? document.DocumentType ?? "Unknown"}, expires {document.ExpiryDate:yyyy-MM-dd}"));
+        foreach (var recipient in recipients)
         {
-            while (await reader.ReadAsync())
+            var key = $"expiry:{now:yyyyMMdd}:{recipient.Id}";
+            var dispatch = await database.EmailDispatches.FindAsync([key], cancellationToken);
+            if (dispatch is { SentAt: not null } || dispatch?.LeaseUntil > now) continue;
+            if (dispatch is null) { dispatch = new EmailDispatch { Id = key }; database.EmailDispatches.Add(dispatch); }
+            dispatch.LeaseUntil = now.AddMinutes(15);
+            await database.SaveChangesAsync(cancellationToken);
+            try { await email.SendAsync(recipient.Email, "Certificates expiring within seven days", text, cancellationToken); }
+            catch
             {
-                var name = reader.GetString(0);
-                var docType = reader.IsDBNull(1) ? "Unknown" : reader.GetString(1);
-                var expiryDate = reader.GetDateTimeOffset(2);
-
-                expiring.AppendLine($"- {name} ({docType}) expires on {expiryDate:yyyy-MM-dd}");
-                count++;
+                dispatch.LeaseUntil = clock.GetUtcNow();
+                await database.SaveChangesAsync(cancellationToken);
+                throw;
             }
+            dispatch.SentAt = clock.GetUtcNow();
+            await database.SaveChangesAsync(cancellationToken);
         }
-
-        if (count == 0)
-        {
-            _logger.LogInformation("No certificates expiring in the next 7 days.");
-            return;
-        }
-
-        await SendExpiryEmailAsync(count, expiring.ToString());
     }
 
-    // Runs every 5 minutes. Scans the uploads container for blobs that have not
-    // yet been recorded in SQL, validates each file, extracts certificate
-    // information, inserts it into SQL, and flags it for admin review (IsValid = 0).
+    public static bool IsReplacement(DocumentEntry expiring, DocumentEntry candidate) => expiring.Id != candidate.Id
+        && expiring.StaffId != null && expiring.DocumentTypeId != null && candidate.StaffId == expiring.StaffId
+        && candidate.DocumentTypeId == expiring.DocumentTypeId && candidate.IsValid && candidate.ScanPassed
+        && candidate.Status == DocumentStatus.Validated && !candidate.IsArchived && expiring.ExpiryDate is not null
+        && (candidate.StartDate is null || candidate.StartDate.Value.UtcDateTime.Date <= expiring.ExpiryDate.Value.UtcDateTime.Date.AddDays(1))
+        && (candidate.ExpiryDate is null || candidate.ExpiryDate.Value.UtcDateTime.Date > expiring.ExpiryDate.Value.UtcDateTime.Date);
+
     [Function("ProcessUploadedBlob")]
-    public async Task ProcessUploadedBlob([TimerTrigger("0 */5 * * * *")] TimerInfo myTimer)
+    public async Task ProcessUploadedBlob([BlobTrigger("%UploadsContainer%/{name}", Connection = "ProcessingStorage")] Stream content,
+        string name, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Blob processing sweep executed at: {executionTime}", DateTime.UtcNow);
-
-        var containerClient = new BlobContainerClient(StorageConnectionString, StorageContainerName);
-        if (!await containerClient.ExistsAsync())
+        var container = configuration["UploadsContainer"]!;
+        var document = await database.Documents.SingleOrDefaultAsync(document => document.ContainerName == container && document.BlobName == name, cancellationToken);
+        if (document is null)
         {
-            _logger.LogWarning("Container {container} does not exist; nothing to process.", StorageContainerName);
+            var reservation = await database.ShareLinks.SingleOrDefaultAsync(link => link.ContainerName == container && link.BlobName == name, cancellationToken);
+            if (reservation is null)
+            {
+                var identifiers = UploadNaming.Parse(name);
+                var staffId = identifiers.StaffId is not null && await database.Staff.AnyAsync(staff => staff.Id == identifiers.StaffId, cancellationToken) ? identifiers.StaffId : null;
+                var typeId = identifiers.DocumentTypeId is not null && await database.DocumentTypes.AnyAsync(type => type.Id == identifiers.DocumentTypeId, cancellationToken) ? identifiers.DocumentTypeId : null;
+                document = new DocumentEntry { Name = Path.GetFileName(name), BlobName = name, ContainerName = container,
+                    StaffId = staffId, DocumentTypeId = typeId, Status = DocumentStatus.AwaitingScan, Issue = "Upload requires review." };
+                database.Documents.Add(document);
+                await database.SaveChangesAsync(cancellationToken);
+            }
+        }
+        if (document is not null) await ProcessDocumentAsync(document, cancellationToken);
+    }
+
+    [Function("RetryPendingUploads")]
+    public async Task RetryPendingUploads([TimerTrigger("0 */5 * * * *")] TimerInfo timer, CancellationToken cancellationToken)
+    {
+        var reservations = await database.ShareLinks.Where(link => link.Purpose == "upload" && link.BlobName != null && link.UsedAt == null && link.RevokedAt == null)
+            .OrderBy(link => link.LastUploadCheck).Take(100).ToListAsync(cancellationToken);
+        foreach (var link in reservations)
+        {
+            link.LastUploadCheck = clock.GetUtcNow();
+            await database.SaveChangesAsync(cancellationToken);
+            var blob = storage.Client.GetBlobContainerClient(link.ContainerName).GetBlobClient(link.BlobName);
+            if (!await blob.ExistsAsync(cancellationToken)) continue;
+            var properties = await blob.GetPropertiesAsync(cancellationToken: cancellationToken);
+            if (!properties.Value.Metadata.TryGetValue("sha256", out var hash) || hash != link.ContentHash) continue;
+            if (!await database.Documents.IgnoreQueryFilters().AnyAsync(document => document.ContainerName == link.ContainerName && document.BlobName == link.BlobName, cancellationToken))
+                database.Documents.Add(new() { ContainerName = link.ContainerName, BlobName = link.BlobName, Name = Path.GetFileName(link.BlobName!),
+                    StaffId = link.StaffId, DocumentTypeId = link.DocumentTypeId, Status = DocumentStatus.AwaitingScan });
+            link.UsedAt = clock.GetUtcNow();
+            await database.SaveChangesAsync(cancellationToken);
+        }
+        var pending = await database.Documents.Where(document => document.ProcessingCompletedAt == null && document.ContainerName != null)
+            .OrderBy(document => document.LastProcessingAttempt).Select(document => document.Id).Take(100).ToListAsync(cancellationToken);
+        foreach (var documentId in pending)
+        {
+            var document = await database.Documents.SingleOrDefaultAsync(document => document.Id == documentId, cancellationToken);
+            if (document is null) continue;
+            try { await ProcessDocumentAsync(document, cancellationToken); }
+            catch (DbUpdateConcurrencyException) { database.ChangeTracker.Clear(); }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            { _logger.LogError(exception, "Processing failed for document {DocumentId}.", document.Id); }
+        }
+    }
+
+    private async Task ProcessDocumentAsync(DocumentEntry document, CancellationToken cancellationToken)
+    {
+        if (document.ProcessingCompletedAt is not null) return;
+        document.LastProcessingAttempt = clock.GetUtcNow();
+        await database.SaveChangesAsync(cancellationToken);
+        var blob = storage.Client.GetBlobContainerClient(document.ContainerName).GetBlobClient(document.BlobName);
+        var tags = await blob.GetTagsAsync(cancellationToken: cancellationToken);
+        tags.Value.Tags.TryGetValue("Malware Scanning scan result", out var scan);
+        if (scan != "No threats found")
+        {
+            document.Status = scan == "Malicious" ? DocumentStatus.Unsafe : DocumentStatus.AwaitingScan;
+            document.Issue = scan == "Malicious" ? "File quarantined by malware scanning." : "Awaiting a successful malware scan.";
+            if (document.Status == DocumentStatus.Unsafe) document.ProcessingCompletedAt = clock.GetUtcNow();
+            await database.SaveChangesAsync(cancellationToken);
             return;
         }
-
-        var processed = await GetProcessedBlobNamesAsync();
-
-        await foreach (var blobItem in containerClient.GetBlobsAsync())
+        var properties = await blob.GetPropertiesAsync(cancellationToken: cancellationToken);
+        if (properties.Value.ContentLength > UploadService.MaximumBytes)
         {
-            if (processed.Contains(blobItem.Name))
-            {
-                continue;
-            }
-
-            try
-            {
-                using var blobStream = new MemoryStream();
-                await containerClient.GetBlobClient(blobItem.Name).DownloadToAsync(blobStream);
-                blobStream.Position = 0;
-
-                await ProcessBlobAsync(blobStream, blobItem.Name);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to process blob {blobName}.", blobItem.Name);
-            }
+            document.Status = DocumentStatus.Unsafe;
+            document.Issue = "File exceeds the processing limit.";
+            document.ProcessingCompletedAt = clock.GetUtcNow();
+            await database.SaveChangesAsync(cancellationToken);
+            return;
         }
-    }
-
-    private async Task<HashSet<string>> GetProcessedBlobNamesAsync()
-    {
-        var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        await using var connection = new SqlConnection(SqlConnectionString);
-        await connection.OpenAsync();
-
-        const string query = "SELECT BlobName FROM dbo.Documents WHERE BlobName IS NOT NULL;";
-        await using var command = new SqlCommand(query, connection);
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            processed.Add(reader.GetString(0));
-        }
-
-        return processed;
-    }
-
-    // Validates the file, extracts certificate information, inserts it into
-    // SQL, and flags it for admin review (IsValid = 0).
-    private async Task ProcessBlobAsync(Stream blobStream, string name)
-    {
-        _logger.LogInformation("Processing uploaded blob: {blobName}", name);
-
-        var extension = Path.GetExtension(name);
+        using var memoryStream = new MemoryStream();
+        await blob.DownloadToAsync(memoryStream, cancellationToken);
+        memoryStream.Position = 0;
+        var extension = Path.GetExtension(document.BlobName!);
         var isPdf = extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase);
         var isImage = SupportedImageExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
-
-        if (!isPdf && !isImage)
+        if ((!isPdf && !isImage) || !IsFileSafe(memoryStream, isPdf, document.BlobName!))
         {
-            _logger.LogWarning("Blob {blobName} is not a supported document type, skipping.", name);
+            document.Status = DocumentStatus.Unsafe;
+            document.Issue = "Unsupported file or unsafe content.";
+            document.ProcessingCompletedAt = clock.GetUtcNow();
+            await database.SaveChangesAsync(cancellationToken);
             return;
         }
-
-        // Both PdfPig and the Vision SDK need a seekable stream, so buffer the blob into memory.
-        using var memoryStream = new MemoryStream();
-        await blobStream.CopyToAsync(memoryStream);
+        document.ScanPassed = true;
         memoryStream.Position = 0;
-
-        // Basic malicious-content validation before parsing.
-        if (!IsFileSafe(memoryStream, isPdf, name))
-        {
-            _logger.LogWarning("Blob {blobName} failed the safety validation and will not be processed.", name);
-            return;
-        }
-        memoryStream.Position = 0;
-
-        // Staff-bound upload links place blobs under "staff/{id}/..." so the
-        // document can be associated with the staff member deterministically.
-        var pathStaffId = TryGetStaffIdFromPath(name);
-
-        DocumentInfo info;
         try
         {
             var text = isPdf
                 ? ExtractTextFromPdf(memoryStream)
                 : await ExtractTextFromImageAsync(memoryStream);
-
-            // Scanned PDFs often contain no extractable text; render the pages
-            // to images and fall back to OCR (the Vision API rejects raw PDFs).
-            if (isPdf && string.IsNullOrWhiteSpace(text))
+            var info = ExtractDocumentInfo(text);
+            if (isPdf && (string.IsNullOrWhiteSpace(text) || info == new DocumentInfo(null, null, null, null, null)))
             {
-                _logger.LogInformation("No text extracted from PDF {blobName}; falling back to OCR.", name);
                 memoryStream.Position = 0;
                 text = await ExtractTextFromPdfViaOcrAsync(memoryStream);
+                info = ExtractDocumentInfo(text);
             }
-
-            info = ExtractDocumentInfo(text);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to extract text from {blobName}.", name);
-            // Still record the document, flagged as ParseFailed, so the admin
-            // sees it and can review the issue.
-            await InsertDocumentAsync(
-                new DocumentInfo(null, null, null, null, null, null, null), name, pathStaffId, DocumentStatusParseFailed);
-            return;
-        }
-
-        _logger.LogInformation(
-            "Extracted from {blobName} - Name: {docName}, StartDate: {startDate}, EndDate: {endDate}, DocumentType: {docType}",
-            name, info.Name, info.StartDate, info.EndDate, info.DocumentType);
-
-        // Insert into SQL flagged for admin review (IsValid = 0).
-        await InsertDocumentAsync(info, name, pathStaffId, DocumentStatusPendingReview);
-    }
-
-    private const int DocumentStatusPendingReview = 0;
-    private const int DocumentStatusRejected = 2;
-    private const int DocumentStatusParseFailed = 3;
-
-    private static int? TryGetStaffIdFromPath(string blobName)
-    {
-        // Accept both the new "staff/{id}/" and legacy "workers/{id}/" prefixes.
-        var match = Regex.Match(blobName, @"^(?:staff|workers)/(\d+)/", RegexOptions.IgnoreCase);
-        return match.Success && int.TryParse(match.Groups[1].Value, out var id) ? id : null;
-    }
-
-    private async Task InsertDocumentAsync(DocumentInfo info, string blobName, int? pathStaffId, int status)
-    {
-        await using var connection = new SqlConnection(SqlConnectionString);
-        await connection.OpenAsync();
-
-        // Prefer the staff id carried in the blob path (deterministic, from the
-        // signed upload link). Otherwise match identifiers extracted from the
-        // document, most reliable first: email -> phone -> full name.
-        // NULL if no unambiguous match exists.
-        var staffId = pathStaffId
-            ?? await MatchStaffAsync(connection, blobName,
-                    "Email = @Value", info.Email)
-            ?? await MatchStaffAsync(connection, blobName,
-                    "REPLACE(REPLACE(REPLACE(REPLACE(PhoneNumber, ' ', ''), '-', ''), '(', ''), ')', '') = @Value", info.Phone)
-            ?? await MatchStaffAsync(connection, blobName,
-                    "CONCAT(FirstName, ' ', LastName) = @Value", info.Name?.Trim());
-
-        const string insert = """
-            INSERT INTO dbo.Documents (Name, BlobName, ExtractedName, Email, Phone, DocumentType, DocumentNumber, StartDate, ExpiryDate, IsValid, Status, StaffId)
-            VALUES (@Name, @BlobName, @ExtractedName, @Email, @Phone, @DocumentType, @DocumentNumber, @StartDate, @ExpiryDate, 0, @Status, @StaffId);
-            """;
-
-        await using var command = new SqlCommand(insert, connection);
-        command.Parameters.AddWithValue("@Name", blobName);
-        command.Parameters.AddWithValue("@BlobName", blobName);
-        command.Parameters.AddWithValue("@ExtractedName", (object?)info.Name ?? DBNull.Value);
-        command.Parameters.AddWithValue("@Email", (object?)info.Email ?? DBNull.Value);
-        command.Parameters.AddWithValue("@Phone", (object?)info.Phone ?? DBNull.Value);
-        command.Parameters.AddWithValue("@DocumentType", (object?)info.DocumentType ?? DBNull.Value);
-        command.Parameters.AddWithValue("@DocumentNumber", (object?)info.DocumentNumber ?? DBNull.Value);
-        command.Parameters.AddWithValue("@StartDate", (object?)info.StartDate ?? DBNull.Value);
-        command.Parameters.AddWithValue("@ExpiryDate", (object?)info.EndDate ?? DBNull.Value);
-        command.Parameters.AddWithValue("@Status", status);
-        command.Parameters.AddWithValue("@StaffId", (object?)staffId ?? DBNull.Value);
-
-        await command.ExecuteNonQueryAsync();
-        _logger.LogInformation("Inserted document record for {blobName}, flagged for admin review.", blobName);
-    }
-
-    // Returns the staff id when exactly one staff member matches the predicate;
-    // null when there is no match or the match is ambiguous.
-    private async Task<int?> MatchStaffAsync(SqlConnection connection, string blobName, string predicate, string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        await using var command = new SqlCommand($"SELECT Id FROM dbo.Staff WHERE {predicate};", connection);
-        command.Parameters.AddWithValue("@Value", value);
-
-        var ids = new List<int>();
-        await using (var reader = await command.ExecuteReaderAsync())
-        {
-            while (await reader.ReadAsync())
+            document.ExtractedName = Limit(info.Name, 256);
+            document.Email = Limit(info.Email, 256);
+            document.Phone = Limit(info.Phone, 64);
+            document.DocumentNumber = Limit(info.DocumentNumber, 128);
+            document.DocumentType = Limit(info.DocumentType, 128);
+            document.StartDate = info.StartDate is null ? null : new DateTimeOffset(DateTime.SpecifyKind(info.StartDate.Value, DateTimeKind.Utc));
+            document.ExpiryDate = info.EndDate is null ? null : new DateTimeOffset(DateTime.SpecifyKind(info.EndDate.Value, DateTimeKind.Utc));
+            if (document.DocumentTypeId is null && info.DocumentType is not null)
+                document.DocumentTypeId = await database.DocumentTypes.Where(type => type.Name == info.DocumentType).Select(type => (int?)type.Id).FirstOrDefaultAsync(cancellationToken);
+            if (document.StaffId is null)
             {
-                ids.Add(reader.GetInt32(0));
+                var matches = info.Email is null ? [] : await database.Staff.Where(staff => staff.Email == info.Email).Select(staff => staff.Id).Take(2).ToListAsync(cancellationToken);
+                if (matches.Count == 0 && info.Phone is not null)
+                    matches = await database.Staff.Where(staff => staff.PhoneNumber != null
+                        && staff.PhoneNumber.Replace(" ", "").Replace("-", "").Replace("(", "").Replace(")", "") == info.Phone)
+                        .Select(staff => staff.Id).Take(2).ToListAsync(cancellationToken);
+                if (matches.Count == 0 && info.Name is not null)
+                    matches = await database.Staff.Where(staff => staff.FirstName + " " + staff.LastName == info.Name).Select(staff => staff.Id).Take(2).ToListAsync(cancellationToken);
+                if (matches.Count == 1) document.StaffId = matches[0];
             }
+            if (string.IsNullOrWhiteSpace(text) || document.StartDate > document.ExpiryDate)
+                throw new InvalidDataException("No readable text or inconsistent dates.");
+            document.Status = DocumentStatus.PendingReview;
+            document.Issue = document.StaffId is null ? "Staff could not be matched; manual association required." : null;
         }
-
-        if (ids.Count > 1)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            _logger.LogWarning("Multiple staff members match {value}; skipping this identifier for {blobName}.", value, blobName);
-            return null;
+            _logger.LogWarning(exception, "Extraction failed for document {DocumentId}.", document.Id);
+            document.Status = DocumentStatus.ParseFailed;
+            document.Issue = "Extraction failed. Review the file and enter its details manually.";
         }
-
-        return ids.Count == 1 ? ids[0] : null;
+        document.IsValid = false;
+        document.ProcessingCompletedAt = clock.GetUtcNow();
+        await database.SaveChangesAsync(cancellationToken);
     }
+
+    private static string? Limit(string? text, int maximum) => text?.Length > maximum ? text[..maximum] : text;
 
     // Rejects files containing common malicious-content markers (embedded
     // JavaScript / launch actions in PDFs, script tags or executable headers
@@ -292,6 +220,15 @@ public class BackgroundWorker
     private bool IsFileSafe(MemoryStream stream, bool isPdf, string name)
     {
         var bytes = stream.ToArray();
+        if (isPdf && (bytes.Length < 5 || Encoding.ASCII.GetString(bytes, 0, 5) != "%PDF-")) return false;
+        if (!isPdf)
+        {
+            using var imageData = SkiaSharp.SKData.CreateCopy(bytes);
+            using var codec = SkiaSharp.SKCodec.Create(imageData);
+            if (codec is null || codec.Info.Width <= 0 || codec.Info.Height <= 0
+                || (long)codec.Info.Width * codec.Info.Height > 40000000) return false;
+            stream.Position = 0;
+        }
 
         // Executable masquerading as a document ("MZ" header).
         if (bytes.Length >= 2 && bytes[0] == 0x4D && bytes[1] == 0x5A)
@@ -317,22 +254,6 @@ public class BackgroundWorker
         return true;
     }
 
-    private async Task SendExpiryEmailAsync(int count, string details)
-    {
-        var emailClient = new EmailClient(Environment.GetEnvironmentVariable("EmailConnection"));
-
-        var message = new EmailMessage(
-            senderAddress: Environment.GetEnvironmentVariable("EmailSender"),
-            recipientAddress: Environment.GetEnvironmentVariable("EmailRecipient"),
-            content: new EmailContent($"{count} certificate(s) expiring within 7 days")
-            {
-                PlainText = $"The following certificates expire within the next week:\n\n{details}\nPlease take action."
-            });
-
-        await emailClient.SendAsync(Azure.WaitUntil.Started, message);
-        _logger.LogInformation("Collated expiry notification email sent for {count} certificate(s).", count);
-    }
-
     private static readonly string[] SupportedImageExtensions =
         [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".tif", ".webp"];
 
@@ -341,8 +262,10 @@ public class BackgroundWorker
         var textBuilder = new StringBuilder();
         using (var document = PdfDocument.Open(pdfStream))
         {
+            if (document.NumberOfPages > 50) throw new InvalidDataException("PDF exceeds 50 pages.");
             foreach (var page in document.GetPages())
             {
+                if (page.Width > 1440 || page.Height > 1440) throw new InvalidDataException("PDF page dimensions exceed the processing limit.");
                 textBuilder.AppendLine(page.Text);
             }
         }
@@ -352,8 +275,10 @@ public class BackgroundWorker
 
     // Renders each PDF page to a PNG and runs it through Azure AI Vision OCR,
     // since the Image Analysis API does not accept PDF input directly.
-    private static async Task<string> ExtractTextFromPdfViaOcrAsync(Stream pdfStream)
+    private async Task<string> ExtractTextFromPdfViaOcrAsync(Stream pdfStream)
     {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("PDF rendering is supported on Windows and Linux hosts.");
         var textBuilder = new StringBuilder();
 
         foreach (var bitmap in PDFtoImage.Conversion.ToImages(pdfStream, leaveOpen: true))
@@ -371,13 +296,12 @@ public class BackgroundWorker
     }
 
     // Uses Azure AI Vision OCR (Read) to extract text from image documents.
-    private static async Task<string> ExtractTextFromImageAsync(Stream imageStream)
+    private async Task<string> ExtractTextFromImageAsync(Stream imageStream)
     {
         var client = new ImageAnalysisClient(
-            new Uri(Environment.GetEnvironmentVariable("VisionEndpoint")
-                ?? throw new InvalidOperationException("VisionEndpoint is not configured.")),
-            new AzureKeyCredential(Environment.GetEnvironmentVariable("VisionKey")
-                ?? throw new InvalidOperationException("VisionKey is not configured.")));
+            new Uri(configuration["Vision:Endpoint"] ?? throw new InvalidOperationException("Vision:Endpoint is required.")),
+            AzureCredentials.Create(configuration), new ImageAnalysisClientOptions
+            { Retry = { NetworkTimeout = TimeSpan.FromSeconds(30), MaxRetries = 2 } });
 
         var result = await client.AnalyzeAsync(BinaryData.FromStream(imageStream), VisualFeatures.Read);
 

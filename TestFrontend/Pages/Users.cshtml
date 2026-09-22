@@ -1,0 +1,24 @@
+@page
+@model TestFrontend.Pages.UsersModel
+@{ ViewData["Title"] = "Users"; }
+<h1>Users</h1>
+<div class="table-responsive">
+<table class="table"><thead><tr><th>Email</th><th>Role</th><th>Enabled</th><th>MFA</th><th></th></tr></thead><tbody>
+@foreach (var user in Model.Data.Users)
+{
+    <tr><td>@user.Email</td><td>@user.Role</td><td>@user.IsEnabled</td><td>@user.MfaEnabled</td><td><a asp-route-id="@user.Id">Edit</a></td></tr>
+}
+</tbody></table></div>
+<h2>@(Model.Id is null ? "Add user" : "Edit user")</h2>
+<form method="post" class="row g-3">
+    <div asp-validation-summary="All" class="text-danger"></div>
+    <input type="hidden" asp-for="Id" />
+    <div class="col-md-6"><label asp-for="Input.Email" class="form-label">Email</label><input asp-for="Input.Email" class="form-control" required /></div>
+    <div class="col-md-6"><label asp-for="Input.Password" class="form-label">New password</label><input asp-for="Input.Password" type="password" autocomplete="new-password" class="form-control" minlength="12" /></div>
+    <div class="col-md-6"><label asp-for="Input.RoleId" class="form-label">Role</label><select asp-for="Input.RoleId" class="form-select">
+    @foreach (var role in Model.Data.Roles.Where(role => role.Name != "Admin" || User.IsInRole("Admin")))
+    { <option value="@role.Id">@role.Name</option> }
+    </select></div>
+    <div class="col-md-6"><label><input asp-for="Input.IsEnabled" /> Enabled</label> <label><input asp-for="Input.MfaEnabled" /> Email MFA</label></div>
+    <div><button class="btn btn-primary" type="submit">Save</button> <a asp-page="/Users" asp-route-id="" class="btn btn-secondary">New user</a></div>
+</form>

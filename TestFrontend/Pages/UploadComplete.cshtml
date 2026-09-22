@@ -1,0 +1,7 @@
+@page
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject Microsoft.Extensions.Localization.IStringLocalizer<TestFrontend.WorkerText> Text
+@{ ViewData["Title"] = "Upload complete"; }
+<partial name="_WorkerLanguage" />
+<h1>@Text["UploadComplete"]</h1>
+<p>@Text["Uploaded"]</p>

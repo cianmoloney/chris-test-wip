@@ -1,4 +1,11 @@
 {
     "version": "2.0",
-    "telemetryMode": "OpenTelemetry"
+    "telemetryMode": "OpenTelemetry",
+    "functionTimeout": "00:05:00",
+    "extensions": {
+        "blobs": {
+            "maxDegreeOfParallelism": 2,
+            "poisonBlobThreshold": 3
+        }
+    }
 }

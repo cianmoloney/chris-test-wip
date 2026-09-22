@@ -1,0 +1,14 @@
+@page
+@model TestFrontend.Pages.StaffNewModel
+@{ ViewData["Title"] = "Add staff"; }
+<h1>Add staff member</h1>
+<form method="post" class="row g-3">
+    <div asp-validation-summary="All" class="text-danger"></div>
+    <div class="col-md-6"><label asp-for="Input.FirstName" class="form-label">First name</label><input asp-for="Input.FirstName" class="form-control" /></div>
+    <div class="col-md-6"><label asp-for="Input.LastName" class="form-label">Last name</label><input asp-for="Input.LastName" class="form-control" /></div>
+    <div class="col-md-6"><label asp-for="Input.Email" class="form-label">Email</label><input asp-for="Input.Email" class="form-control" /></div>
+    <div class="col-md-6"><label asp-for="Input.PhoneNumber" class="form-label">Phone</label><input asp-for="Input.PhoneNumber" class="form-control" /></div>
+    <div class="col-md-6"><label asp-for="Input.StaffTypeId" class="form-label">Type</label><select asp-for="Input.StaffTypeId" class="form-select"><option value="">Select type</option>@foreach(var type in Model.Lookups.StaffTypes) { <option value="@type.Id">@type.Name</option> }</select></div>
+    <div class="col-md-6"><label asp-for="Input.StaffRoleId" class="form-label">Role</label><select asp-for="Input.StaffRoleId" class="form-select"><option value="">Select role</option>@foreach(var role in Model.Lookups.StaffRoles) { <option value="@role.Id">@role.Name</option> }</select></div>
+    <div><button class="btn btn-primary" type="submit">Add staff member</button></div>
+</form>

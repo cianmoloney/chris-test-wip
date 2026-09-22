@@ -1,0 +1,57 @@
+@page
+@model TermsModel
+@inject Microsoft.Extensions.Localization.IStringLocalizer<TestFrontend.WorkerText> Text
+@{
+    ViewData["Title"] = "Terms & Conditions";
+    Layout = "_Layout";
+}
+
+<partial name="_WorkerLanguage" />
+<h1>@Text["Terms"]</h1>
+
+@if (!Model.IsValid)
+{
+    <div class="alert alert-danger">
+        @Text[Model.StatusMessage is null ? "InvalidLink" : "Failure"]
+    </div>
+}
+else if (Model.Staff is null)
+{
+    <div class="alert alert-warning">@Text["InvalidLink"]</div>
+}
+else
+{
+    @if (Model.StatusMessage is not null && !Model.AlreadyAccepted)
+    {
+        <div class="alert alert-info">@Text["Failure"]</div>
+    }
+
+    @if (Model.AlreadyAccepted)
+    {
+        <div class="alert alert-success">
+            @Text["Accepted", Model.AcceptedAt?.UtcDateTime.ToString("g") ?? ""]
+        </div>
+    }
+    else if (Model.Terms is null)
+    {
+        <div class="alert alert-warning">@Text["NoTerms"]</div>
+    }
+    else
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">@Model.Terms.TermsDocument.Title (v@(Model.Terms.Version))</h5>
+                <p class="card-text" style="white-space: pre-wrap;">@Model.Terms.Content</p>
+            </div>
+        </div>
+
+        <form method="post" asp-route-token="@Model.Token" asp-route-lang="@Model.Lang">
+            <input type="hidden" asp-for="TermsDocumentVersionId" />
+            <div class="form-check mb-3">
+                <input asp-for="Agree" class="form-check-input" />
+                <label asp-for="Agree" class="form-check-label">@Text["AgreeLabel"]</label>
+            </div>
+            <button type="submit" class="btn btn-primary">@Text["Agree"]</button>
+        </form>
+    }
+}

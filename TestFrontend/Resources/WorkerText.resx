@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <data name="Registration" xml:space="preserve"><value>Staff registration</value></data>
+  <data name="InvalidLink" xml:space="preserve"><value>This link is invalid, expired or already used. Please request a new link.</value></data>
+  <data name="FirstName" xml:space="preserve"><value>First name</value></data>
+  <data name="LastName" xml:space="preserve"><value>Last name</value></data>
+  <data name="Email" xml:space="preserve"><value>Email</value></data>
+  <data name="Phone" xml:space="preserve"><value>Phone number</value></data>
+  <data name="Role" xml:space="preserve"><value>Role</value></data>
+  <data name="SelectRole" xml:space="preserve"><value>Select a role</value></data>
+  <data name="StaffType" xml:space="preserve"><value>Staff type</value></data>
+  <data name="SelectType" xml:space="preserve"><value>Select a staff type</value></data>
+  <data name="RequiredDocuments" xml:space="preserve"><value>Required documents</value></data>
+  <data name="Register" xml:space="preserve"><value>Register</value></data>
+  <data name="Upload" xml:space="preserve"><value>Upload</value></data>
+  <data name="UploadTitle" xml:space="preserve"><value>Upload document</value></data>
+  <data name="DocumentType" xml:space="preserve"><value>Document type (optional)</value></data>
+  <data name="Terms" xml:space="preserve"><value>Terms and conditions</value></data>
+  <data name="AgreeLabel" xml:space="preserve"><value>I have read and agree to these terms</value></data>
+  <data name="Agree" xml:space="preserve"><value>Accept</value></data>
+  <data name="Accepted" xml:space="preserve"><value>Your acceptance was recorded at {0} UTC.</value></data>
+  <data name="NoTerms" xml:space="preserve"><value>No terms are available. Please contact HR.</value></data>
+  <data name="RegistrationComplete" xml:space="preserve"><value>Registration complete</value></data>
+  <data name="Registered" xml:space="preserve"><value>Your details have been recorded.</value></data>
+  <data name="UploadComplete" xml:space="preserve"><value>Upload complete</value></data>
+  <data name="Uploaded" xml:space="preserve"><value>Your document has been received for review.</value></data>
+  <data name="Failure" xml:space="preserve"><value>We could not complete this request. Check your details and try again, or contact HR.</value></data>
+  <data name="The {0} field is required." xml:space="preserve"><value>The {0} field is required.</value></data>
+  <data name="The {0} field is not a valid e-mail address." xml:space="preserve"><value>Enter a valid email address.</value></data>
+</root>

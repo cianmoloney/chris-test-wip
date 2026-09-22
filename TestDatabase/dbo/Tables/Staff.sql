@@ -8,7 +8,9 @@ CREATE TABLE [dbo].[Staff]
     [LastName]     NVARCHAR (128)      NOT NULL,
     [Email]        NVARCHAR (256)      NOT NULL,
     [PhoneNumber]  NVARCHAR (32)       NULL,
-    [Role]         NVARCHAR (128)      NULL,
+    [StaffRoleId]  INT NULL CONSTRAINT [FK_Staff_StaffRoles] REFERENCES [dbo].[StaffRoles] ([Id]) ON DELETE SET NULL,
+    [Role] NVARCHAR(128) NULL,
+    [IsArchived] BIT NOT NULL CONSTRAINT [DF_Staff_IsArchived] DEFAULT (0),
     [RegisteredAt] DATETIMEOFFSET      NOT NULL CONSTRAINT [DF_Staff_RegisteredAt] DEFAULT (SYSDATETIMEOFFSET()),
     [StaffTypeId] INT                 NULL
         CONSTRAINT [FK_Staff_StaffTypes_StaffTypeId]

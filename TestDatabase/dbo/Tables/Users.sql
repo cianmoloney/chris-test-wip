@@ -11,7 +11,11 @@ CREATE TABLE [dbo].[Users]
         REFERENCES [dbo].[Roles] ([Id]),
     [DateCreated]  DATETIME2           NOT NULL CONSTRAINT [DF_Users_DateCreated] DEFAULT (SYSUTCDATETIME()),
     [IsEnabled]    BIT                 NOT NULL CONSTRAINT [DF_Users_IsEnabled] DEFAULT (1),
-    [MfaEnabled]   BIT                 NOT NULL CONSTRAINT [DF_Users_MfaEnabled] DEFAULT (0)
+    [MfaEnabled]   BIT                 NOT NULL CONSTRAINT [DF_Users_MfaEnabled] DEFAULT (0),
+    [FailedAttempts] INT NOT NULL CONSTRAINT [DF_Users_FailedAttempts] DEFAULT (0),
+    [LockedUntil] DATETIMEOFFSET NULL,
+    [LastChallengeAt] DATETIMEOFFSET NULL,
+    [RowVersion] ROWVERSION NOT NULL
 );
 GO
 

@@ -1,0 +1,5 @@
+CREATE TABLE [dbo].[StaffRoles]
+(
+    [Id] INT IDENTITY(1,1) NOT NULL CONSTRAINT [PK_StaffRoles] PRIMARY KEY,
+    [Name] NVARCHAR(128) NOT NULL CONSTRAINT [UQ_StaffRoles_Name] UNIQUE
+);

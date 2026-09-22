@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <data name="Registration" xml:space="preserve"><value>Rejestracja pracownika</value></data>
+  <data name="InvalidLink" xml:space="preserve"><value>Link jest nieprawidłowy, wygasł lub został już wykorzystany. Poproś o nowy link.</value></data>
+  <data name="FirstName" xml:space="preserve"><value>Imię</value></data>
+  <data name="LastName" xml:space="preserve"><value>Nazwisko</value></data>
+  <data name="Email" xml:space="preserve"><value>Adres e-mail</value></data>
+  <data name="Phone" xml:space="preserve"><value>Numer telefonu</value></data>
+  <data name="Role" xml:space="preserve"><value>Stanowisko</value></data>
+  <data name="SelectRole" xml:space="preserve"><value>Wybierz stanowisko</value></data>
+  <data name="StaffType" xml:space="preserve"><value>Rodzaj zatrudnienia</value></data>
+  <data name="SelectType" xml:space="preserve"><value>Wybierz rodzaj zatrudnienia</value></data>
+  <data name="RequiredDocuments" xml:space="preserve"><value>Wymagane dokumenty</value></data>
+  <data name="Register" xml:space="preserve"><value>Zarejestruj się</value></data>
+  <data name="Upload" xml:space="preserve"><value>Prześlij</value></data>
+  <data name="UploadTitle" xml:space="preserve"><value>Prześlij dokument</value></data>
+  <data name="DocumentType" xml:space="preserve"><value>Rodzaj dokumentu (opcjonalnie)</value></data>
+  <data name="Terms" xml:space="preserve"><value>Warunki i oświadczenia</value></data>
+  <data name="AgreeLabel" xml:space="preserve"><value>Przeczytałem i akceptuję te warunki</value></data>
+  <data name="Agree" xml:space="preserve"><value>Akceptuję</value></data>
+  <data name="Accepted" xml:space="preserve"><value>Akceptację zapisano: {0} UTC.</value></data>
+  <data name="NoTerms" xml:space="preserve"><value>Brak dostępnych warunków. Skontaktuj się z działem kadr.</value></data>
+  <data name="RegistrationComplete" xml:space="preserve"><value>Rejestracja zakończona</value></data>
+  <data name="Registered" xml:space="preserve"><value>Twoje dane zostały zapisane.</value></data>
+  <data name="UploadComplete" xml:space="preserve"><value>Przesyłanie zakończone</value></data>
+  <data name="Uploaded" xml:space="preserve"><value>Dokument został otrzymany i oczekuje na weryfikację.</value></data>
+  <data name="Failure" xml:space="preserve"><value>Nie udało się wykonać operacji. Sprawdź dane i spróbuj ponownie lub skontaktuj się z działem kadr.</value></data>
+  <data name="The {0} field is required." xml:space="preserve"><value>Pole {0} jest wymagane.</value></data>
+  <data name="The {0} field is not a valid e-mail address." xml:space="preserve"><value>Podaj prawidłowy adres e-mail.</value></data>
+</root>
