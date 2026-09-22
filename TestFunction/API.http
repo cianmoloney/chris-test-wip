@@ -5,6 +5,8 @@
 @termsVersionId = 1
 @session = REPLACE_WITH_USER_SESSION
 @linkToken = REPLACE_WITH_ISSUED_LINK
+@officeRoleRevision = REPLACE_WITH_REVISION_FOR_ROLE_3_FROM_GET_ROLES
+@staffRoleRevision = REPLACE_WITH_ROLE_REVISIONS_1_FROM_GET_DOCUMENT_TYPES
 
 ### Authorize an uploaded-file download (Staff.Read; archived/quarantined files blocked)
 GET {{baseUrl}}/files/access?container=uploads&blob=2026%2F09%2Fcertificate.pdf
@@ -35,13 +37,13 @@ GET {{baseUrl}}/roles
 Authorization: Bearer {{token}}
 X-User-Session: {{session}}
 
-### Replace a role's enabled responsibilities (Admin only; 204)
+### Replace a role's enabled responsibilities (Admin only; 204, stale revision returns 409)
 PUT {{baseUrl}}/roles/3/responsibilities
 Authorization: Bearer {{token}}
 X-User-Session: {{session}}
 Content-Type: application/json
 
-{ "responsibilities": ["Staff.Read", "Documents.Validate", "Links.Write"] }
+{ "responsibilities": ["Staff.Read", "Documents.Validate", "Links.Write"], "expectedRevision": "{{officeRoleRevision}}" }
 
 ### Filter and sort staff
 GET {{baseUrl}}/staff?filter=Smith&sortBy=registered
@@ -95,13 +97,13 @@ GET {{baseUrl}}/staff-roles/1
 Authorization: Bearer {{token}}
 X-User-Session: {{session}}
 
-### Save the complete required-document selection for one staff role (204)
+### Save the complete required-document selection for one staff role (204, stale revision returns 409)
 PUT {{baseUrl}}/staff-roles/1/document-types
 Authorization: Bearer {{token}}
 X-User-Session: {{session}}
 Content-Type: application/json
 
-{ "documentTypeIds": [1, 2] }
+{ "documentTypeIds": [1, 2], "expectedRevision": "{{staffRoleRevision}}" }
 
 ### Role Manager catalog: all document types, staff roles and requirements
 GET {{baseUrl}}/document-types

@@ -12,6 +12,8 @@ public sealed class AccountService(AppDbContext database, IEmailService email, T
 {
     private static readonly PasswordHasher<User> Hasher = new();
     private static readonly string DummyHash = Hasher.HashPassword(new User(), Guid.NewGuid().ToString());
+    private static readonly object ValidatedSessionKey = new();
+    private sealed record ValidatedSession(string TokenHash, DateTimeOffset ExpiresAt, UserResponse User);
     public static string HashToken(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     public static string NewToken() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
 
@@ -73,11 +75,12 @@ public sealed class AccountService(AppDbContext database, IEmailService email, T
         return new(token, false, authenticated.ExpiresAt, Map(session.User));
     }
 
-    private async Task<UserSession> FindSessionAsync(string token, CancellationToken cancellationToken)
+    private async Task<UserSession> FindSessionAsync(string token, CancellationToken cancellationToken, bool tracking = true)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length > 128) throw new ApiException(401, "Sign in is required.");
         var hash = HashToken(token);
-        var session = await database.UserSessions.Include(session => session.User).ThenInclude(user => user.Role)
+        var query = tracking ? database.UserSessions.AsQueryable() : database.UserSessions.AsNoTracking();
+        var session = await query.Include(session => session.User).ThenInclude(user => user.Role)
             .ThenInclude(role => role!.Responsibilities).SingleOrDefaultAsync(session => session.TokenHash == hash, cancellationToken);
         if (session is null || session.ExpiresAt <= clock.GetUtcNow() || !session.User.IsEnabled)
             throw new ApiException(401, "Sign in is required.");
@@ -86,11 +89,23 @@ public sealed class AccountService(AppDbContext database, IEmailService email, T
 
     public async Task<UserResponse> RequireAsync(HttpRequest request, string? permission, CancellationToken cancellationToken)
     {
-        var session = await FindSessionAsync(request.Headers["X-User-Session"].ToString(), cancellationToken);
-        if (session.MfaPending) throw new ApiException(401, "Complete MFA before continuing.");
-        var user = Map(session.User);
+        cancellationToken.ThrowIfCancellationRequested();
+        var token = request.Headers["X-User-Session"].ToString();
+        if (string.IsNullOrWhiteSpace(token) || token.Length > 128) throw new ApiException(401, "Sign in is required.");
+        var hash = HashToken(token);
+        var validated = request.HttpContext.Items.TryGetValue(ValidatedSessionKey, out var cached) ? cached as ValidatedSession : null;
+        if (validated is null || validated.TokenHash != hash)
+        {
+            request.HttpContext.Items.Remove(ValidatedSessionKey);
+            var session = await FindSessionAsync(token, cancellationToken, tracking: false);
+            if (session.MfaPending) throw new ApiException(401, "Complete MFA before continuing.");
+            validated = new(hash, session.ExpiresAt, Map(session.User));
+            request.HttpContext.Items[ValidatedSessionKey] = validated;
+        }
+        if (validated.ExpiresAt <= clock.GetUtcNow()) throw new ApiException(401, "Sign in is required.");
+        var user = validated.User;
         if (permission is not null && !user.Permissions.Contains(permission)) throw new ApiException(403, "This action is not permitted.");
-        return user;
+        return user with { Permissions = [.. user.Permissions] };
     }
 
     public async Task<UserResponse> RequireAdminAsync(HttpRequest request, CancellationToken cancellationToken)
@@ -120,27 +135,43 @@ public sealed class AccountService(AppDbContext database, IEmailService email, T
         if (!enabled.Contains(Permissions.StaffRead) && enabled.Overlaps(
             [Permissions.StaffWrite, Permissions.DocumentsWrite, Permissions.DocumentsValidate, Permissions.LinksWrite, Permissions.TermsWrite]))
             throw new ApiException(400, "Staff.Read is required for staff editing, document editing or validation, links, and terms.", "Responsibilities");
-        var role = await database.Roles.Include(role => role.Responsibilities)
-            .SingleOrDefaultAsync(role => role.Id == roleId, cancellationToken) ?? throw new ApiException(404, "Role not found.");
-        var previous = role.Responsibilities.Where(responsibility => responsibility.IsEnabled && Permissions.All.Contains(responsibility.Name))
-            .Select(responsibility => responsibility.Name).Order().ToList();
-        foreach (var permission in Permissions.All)
+        AuditEntry? audit = null;
+        await database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            var responsibility = role.Responsibilities.SingleOrDefault(responsibility => responsibility.Name == permission);
-            if (responsibility is null)
-                role.Responsibilities.Add(new Responsibility { Name = permission, IsEnabled = enabled.Contains(permission) });
-            else
-                responsibility.IsEnabled = enabled.Contains(permission);
-        }
-        database.AuditEntries.Add(new()
-        {
-            UserId = actor.Id, Action = "Role.Responsibilities", Subject = $"Role {role.Id}: [{string.Join(",", previous)}] -> [{string.Join(",", enabled.Order())}]"
+            if (audit is not null) database.Entry(audit).State = EntityState.Detached;
+            await using var transaction = database.Database.IsRelational() && database.Database.CurrentTransaction is null
+                ? await database.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken) : null;
+            foreach (var entry in database.ChangeTracker.Entries<Responsibility>().Where(entry => entry.Entity.RoleId == roleId).ToList())
+                entry.State = EntityState.Detached;
+            foreach (var entry in database.ChangeTracker.Entries<Role>().Where(entry => entry.Entity.Id == roleId).ToList())
+                entry.State = EntityState.Detached;
+            var role = await database.Roles.Include(role => role.Responsibilities)
+                .SingleOrDefaultAsync(role => role.Id == roleId, cancellationToken) ?? throw new ApiException(404, "Role not found.");
+            var previous = role.Responsibilities.Where(responsibility => responsibility.IsEnabled && Permissions.All.Contains(responsibility.Name))
+                .Select(responsibility => responsibility.Name).Order().ToList();
+            if (request.ExpectedRevision != AssignmentRevision.Responsibilities(previous))
+                throw new ApiException(409, "This role's responsibilities changed. Reload the page and review the current responsibilities before saving.");
+            foreach (var permission in Permissions.All)
+            {
+                var responsibility = role.Responsibilities.SingleOrDefault(responsibility => responsibility.Name == permission);
+                if (responsibility is null)
+                    role.Responsibilities.Add(new Responsibility { Name = permission, IsEnabled = enabled.Contains(permission) });
+                else
+                    responsibility.IsEnabled = enabled.Contains(permission);
+            }
+            audit = new()
+            {
+                UserId = actor.Id, Action = "Role.Responsibilities", Subject = $"Role {role.Id}: [{string.Join(",", previous)}] -> [{string.Join(",", enabled.Order())}]"
+            };
+            database.AuditEntries.Add(audit);
+            await database.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         });
-        await database.SaveChangesAsync(cancellationToken);
     }
 
     public async Task LogoutAsync(HttpRequest request, CancellationToken cancellationToken)
     {
+        request.HttpContext.Items.Remove(ValidatedSessionKey);
         var hash = HashToken(request.Headers["X-User-Session"].ToString());
         var session = await database.UserSessions.FindAsync([hash], cancellationToken);
         if (session is not null) database.UserSessions.Remove(session);

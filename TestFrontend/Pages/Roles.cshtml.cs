@@ -22,7 +22,7 @@ public class RolesModel(FunctionApiClient api, ILogger<RolesModel> logger) : Pag
         Id ??= Data.Roles.FirstOrDefault()?.Id;
         var role = Data.Roles.SingleOrDefault(role => role.Id == Id);
         if (Id is not null && role is null) return NotFound();
-        if (role is not null) Input = new() { Responsibilities = role.Responsibilities };
+        if (role is not null) Input = new() { Responsibilities = role.Responsibilities, ExpectedRevision = role.Revision };
         return Page();
     }
 

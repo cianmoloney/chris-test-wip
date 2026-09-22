@@ -26,7 +26,8 @@ else
         {
             <div class="alert alert-warning" role="alert">@Text[Model.StatusMessage]</div>
         }
-        <form method="post" asp-route-token="@Model.Token" asp-route-lang="@Request.Query["lang"]" class="col-lg-8">
+          <form method="post" asp-route-token="@Model.Token" asp-route-lang="@Request.Query["lang"]" class="col-lg-8" data-multiple-registration
+              data-maximum-staff="@LinkMultipleRegistrationRequest.MaximumStaff" data-entry-label="@Text["StaffEntry", "{0}"]" data-remove-label="@Text["RemoveStaff", "{0}"]">
             <div asp-validation-summary="All" class="text-danger" role="alert"></div>
             @for (var index = 0; index < Model.Staff.Count; index++)
             {
@@ -77,14 +78,11 @@ else
                             <span asp-validation-for="Staff[index].StaffTypeId" class="text-danger"></span>
                         </div>
                     </div>
-                    @if (Model.Staff.Count > 1)
-                    {
-                        <button type="submit" asp-page-handler="Remove" asp-route-index="@index" asp-route-token="@Model.Token" asp-route-lang="@Request.Query["lang"]" class="btn btn-sm btn-outline-danger mt-3" formnovalidate>@Text["RemoveStaff", index + 1]</button>
-                    }
+                    <button type="submit" asp-page-handler="Remove" asp-route-index="@index" asp-route-token="@Model.Token" asp-route-lang="@Request.Query["lang"]" class="btn btn-sm btn-outline-danger mt-3" formnovalidate data-remove-staff hidden="@(Model.Staff.Count <= 1)">@Text["RemoveStaff", index + 1]</button>
                 </fieldset>
             }
             <div class="d-flex gap-2 flex-wrap">
-                <button type="submit" asp-page-handler="Add" asp-route-token="@Model.Token" asp-route-lang="@Request.Query["lang"]" class="btn btn-outline-secondary" disabled="@(Model.Staff.Count >= LinkMultipleRegistrationRequest.MaximumStaff)" formnovalidate>@Text["AddAnother"]</button>
+                <button type="submit" asp-page-handler="Add" asp-route-token="@Model.Token" asp-route-lang="@Request.Query["lang"]" class="btn btn-outline-secondary" disabled="@(Model.Staff.Count >= LinkMultipleRegistrationRequest.MaximumStaff)" formnovalidate data-add-staff>@Text["AddAnother"]</button>
                 <button type="submit" class="btn btn-primary">@Text["RegisterAll"]</button>
             </div>
         </form>
@@ -93,14 +91,4 @@ else
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
-    <script>
-        document.querySelectorAll('[data-staff-entry]').forEach(entry => {
-            const roleSelect = entry.querySelector('[data-role-select]');
-            const update = () => entry.querySelectorAll('[data-role-id]').forEach(requirement => {
-                requirement.hidden = requirement.dataset.roleId !== roleSelect.value;
-            });
-            roleSelect.addEventListener('change', update);
-            update();
-        });
-    </script>
 }

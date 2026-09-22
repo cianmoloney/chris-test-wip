@@ -103,17 +103,29 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
 
     public async Task SaveStaffRoleDocumentsAsync(int id, SaveStaffRoleDocumentsRequest request, CancellationToken cancellationToken)
     {
-        var role = await database.StaffRoles.Include(role => role.RequiredDocumentTypes)
-            .SingleOrDefaultAsync(role => role.Id == id, cancellationToken) ?? throw NotFound();
-        if (request.DocumentTypeIds is null || request.DocumentTypeIds.Count > 256)
-            throw new ApiException(400, "Select valid document types.", "DocumentTypeIds");
-        var typeIds = request.DocumentTypeIds.ToHashSet();
-        if (await database.DocumentTypes.CountAsync(type => typeIds.Contains(type.Id), cancellationToken) != typeIds.Count)
-            throw new ApiException(400, "Select valid document types.", "DocumentTypeIds");
-        database.StaffRoleDocumentTypes.RemoveRange(role.RequiredDocumentTypes.Where(requirement => !typeIds.Contains(requirement.DocumentTypeId)));
-        foreach (var typeId in typeIds.Where(typeId => !role.RequiredDocumentTypes.Any(requirement => requirement.DocumentTypeId == typeId)))
-            role.RequiredDocumentTypes.Add(new StaffRoleDocumentType { DocumentTypeId = typeId });
-        await database.SaveChangesAsync(cancellationToken);
+        await database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var transaction = database.Database.IsRelational() && database.Database.CurrentTransaction is null
+                ? await database.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken) : null;
+            foreach (var entry in database.ChangeTracker.Entries<StaffRoleDocumentType>().Where(entry => entry.Entity.StaffRoleId == id).ToList())
+                entry.State = EntityState.Detached;
+            foreach (var entry in database.ChangeTracker.Entries<StaffRole>().Where(entry => entry.Entity.Id == id).ToList())
+                entry.State = EntityState.Detached;
+            var role = await database.StaffRoles.Include(role => role.RequiredDocumentTypes)
+                .SingleOrDefaultAsync(role => role.Id == id, cancellationToken) ?? throw NotFound();
+            if (request.DocumentTypeIds is null || request.DocumentTypeIds.Count > 256)
+                throw new ApiException(400, "Select valid document types.", "DocumentTypeIds");
+            var typeIds = request.DocumentTypeIds.ToHashSet();
+            if (await database.DocumentTypes.CountAsync(type => typeIds.Contains(type.Id), cancellationToken) != typeIds.Count)
+                throw new ApiException(400, "Select valid document types.", "DocumentTypeIds");
+            if (request.ExpectedRevision != AssignmentRevision.Documents(role.RequiredDocumentTypes.Select(requirement => requirement.DocumentTypeId)))
+                throw new ApiException(409, "This role's requirements changed. Reload the page and review the current requirements before saving.");
+            database.StaffRoleDocumentTypes.RemoveRange(role.RequiredDocumentTypes.Where(requirement => !typeIds.Contains(requirement.DocumentTypeId)));
+            foreach (var typeId in typeIds.Where(typeId => !role.RequiredDocumentTypes.Any(requirement => requirement.DocumentTypeId == typeId)))
+                role.RequiredDocumentTypes.Add(new StaffRoleDocumentType { DocumentTypeId = typeId });
+            await database.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        });
     }
 
     public async Task<DocumentTypeResponse> GetDocumentTypeAsync(int id, CancellationToken cancellationToken)

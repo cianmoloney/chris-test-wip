@@ -20,10 +20,10 @@
     else
     {
         <div class="row g-3 mb-4">
-            <form method="get" class="col-md-6">
+            <form method="get" class="col-md-6" data-auto-submit>
                 <label asp-for="DocumentId" class="form-label">Terms document</label>
                 <div class="d-flex gap-2">
-                    <select asp-for="DocumentId" class="form-select" onchange="this.form.requestSubmit()">
+                    <select asp-for="DocumentId" class="form-select">
                         @foreach (var terms in Model.Terms)
                         { <option value="@terms.Id">@terms.Title</option> }
                     </select>
@@ -32,11 +32,11 @@
             </form>
             @if (Model.Versions.Count > 0)
             {
-                <form method="get" class="col-md-6">
+                <form method="get" class="col-md-6" data-terms-selector>
                     <input type="hidden" name="DocumentId" value="@Model.DocumentId" />
                     <label asp-for="VersionId" class="form-label">Version and language</label>
                     <div class="d-flex gap-2">
-                        <select asp-for="VersionId" class="form-select" onchange="this.form.requestSubmit()">
+                        <select asp-for="VersionId" class="form-select">
                             @foreach (var version in Model.Versions)
                             {
                                 <option value="@version.Id">Version @version.Version - @LanguageName(version.Language) (@(version.IsActive ? "Current" : "Previous"))</option>
@@ -57,19 +57,19 @@
         <a asp-page="/ManageTerms" asp-route-mode="document" class="btn btn-outline-secondary">Add terms document</a>
     </div>
 
-    @if (Model.SelectedVersion is { } selected)
+    @foreach (var version in Model.Versions)
     {
-        <section class="border-top pt-3" aria-labelledby="terms-heading">
-            <h2 id="terms-heading" class="h4 text-break">@selected.TermsDocument.Title</h2>
+        <section class="border-top pt-3" aria-labelledby="terms-heading-@version.Id" data-terms-version="@version.Id" hidden="@(Model.VersionId != version.Id)">
+            <h2 id="terms-heading-@version.Id" class="h4 text-break">@version.TermsDocument.Title</h2>
             <div class="d-flex flex-wrap gap-2 text-muted mb-3">
-                <span>Version @selected.Version</span><span>@LanguageName(selected.Language)</span>
-                <span>@(selected.IsActive ? "Current" : "Previous")</span>
-                <span>Published @selected.CreatedAt.ToLocalTime().ToString("g")</span>
+                <span>Version @version.Version</span><span>@LanguageName(version.Language)</span>
+                <span>@(version.IsActive ? "Current" : "Previous")</span>
+                <span>Published @version.CreatedAt.ToLocalTime().ToString("g")</span>
             </div>
-            <div class="text-break" lang="@selected.Language" style="white-space: pre-wrap">@selected.Content</div>
+            <div class="text-break" lang="@version.Language" style="white-space: pre-wrap">@version.Content</div>
         </section>
     }
-    else if (Model.SelectedDocument is not null)
+    @if (Model.SelectedVersion is null && Model.SelectedDocument is not null)
     {
         <p class="text-muted">No published versions for this document.</p>
     }

@@ -35,7 +35,11 @@ public class DocumentTypesModel(FunctionApiClient api, ILogger<DocumentTypesMode
             Input = new() { Name = type.Name, TextIdentifier = type.TextIdentifier ?? "", StaffRoleIds = type.StaffRoleIds };
         }
         if (Mode == "requirements")
-            Requirements = new() { DocumentTypeIds = Data.DocumentTypes.Where(type => type.StaffRoleIds.Contains(RoleId ?? 0)).Select(type => type.Id).ToList() };
+            Requirements = new()
+            {
+                DocumentTypeIds = Data.DocumentTypes.Where(type => type.StaffRoleIds.Contains(RoleId ?? 0)).Select(type => type.Id).ToList(),
+                ExpectedRevision = RoleId is { } roleId ? Data.RoleRevisions[roleId] : ""
+            };
         return Page();
     }
 

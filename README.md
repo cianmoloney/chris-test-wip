@@ -15,6 +15,15 @@ Every API call requires the configured application's identity. Office operations
 additionally require a valid user session; public worker operations require a
 purpose-scoped capability. Browser-supplied role or staff claims are not trusted.
 
+Successful office-session validation is reused only within the current
+`HttpContext`, keyed by the session-token hash. The API wrapper and handler
+therefore share one session lookup; each permission/Admin check and expiry
+check still runs. A new HTTP request reads current session/account/permission
+data from SQL without EF tracking, so account disabling, revocation and role
+changes take effect on the next request. Failed authentication is not cached;
+logout clears the current request's validated session. No cross-request or
+time-based authentication cache is used.
+
 ## Azure Configuration
 
 1. Enable a system-assigned managed identity on the frontend App Service, or
@@ -178,6 +187,47 @@ query/update behavior, document ownership, terms acceptance, and frontend token
 handling. Data-service tests use EF's in-memory provider, not SQL Server; SQL
 sequences, uniqueness constraints, transactions, and deployed managed identity
 still require integration verification against the configured services.
+
+### Browser Interaction Checks
+
+Role Manager, office roles, users, and loaded terms versions switch locally.
+Staff/document filters, other terms documents, and file folders use normal
+server navigation, preserving fresh data, server search semantics and browser
+Back/Forward behavior. Registration Add/Remove updates the form locally.
+Unsaved forms are protected on navigation; saving one role warns before
+discarding drafts for another role. Drafts live only in page memory, never in
+local storage, and are not restored after a confirmed departure or reload.
+Saves, permissions, public-link validity, and final validation remain
+server-side; ordinary form navigation still works without JavaScript.
+
+Role requirements and office-role saves require `ExpectedRevision`, obtained
+from the loaded assignment set. The API compares it within a serializable SQL
+transaction and returns 409 for stale sets. A rejected draft retains its
+original revision; reload and review the latest assignments before saving.
+Deploy the frontend and Function together (no database schema change). Older
+clients without the required revision must refresh/update before saving.
+The static-asset authentication bypass remains enabled for public CSS/JS only.
+
+The browser regression check uses an isolated frontend, fake API/storage and
+separate browser context; it never changes the real database. It requires
+Node.js, Microsoft Edge, and port 10000 free for its temporary Blob fixture
+(stop Azurite yourself first if necessary). From the repository root:
+
+```powershell
+dotnet build TestFrontend/TestFrontend.csproj -c PageInteractionsVerification
+npm install --no-save --prefix "$env:TEMP/hr-browser-tests" playwright
+$env:PLAYWRIGHT_MODULE = Join-Path $env:TEMP "hr-browser-tests/node_modules/playwright"
+node TestFunction.Tests/PageInteractions.browser.cjs
+```
+
+Set `FRONTEND_TEST_CONFIGURATION` to test a different build configuration or
+`PLAYWRIGHT_CHANNEL` to use another installed Playwright browser channel.
+The check covers request counts, warnings before draft loss, role-specific
+save targets, stale revisions, native folder/filter history, failed terms
+navigation, selected uploads, user edits, translated registration,
+no-JavaScript fallbacks, mobile widths and revoked sessions. Live Azure Storage
+latency is not measured. SQL concurrency tests require `HR_TEST_SQL` pointing
+to a published disposable database named `HrImplementationVerification_*`.
 
 ## Workflow Rules
 

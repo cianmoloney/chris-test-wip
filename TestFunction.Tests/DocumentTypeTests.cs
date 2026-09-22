@@ -50,7 +50,7 @@ public sealed class DocumentTypeTests
         var eligibility = new EligibilityService(database, TimeProvider.System);
         Assert.True((await eligibility.GetAsync([worker], default))[20].IsReady);
 
-        await service.SaveStaffRoleDocumentsAsync(1, new() { DocumentTypeIds = [2, 2] }, default);
+        await service.SaveStaffRoleDocumentsAsync(1, new() { DocumentTypeIds = [2, 2], ExpectedRevision = AssignmentRevision.Documents([1]) }, default);
 
         Assert.Equal(new[] { 2 }, await database.StaffRoleDocumentTypes.Where(requirement => requirement.StaffRoleId == 1).Select(requirement => requirement.DocumentTypeId).ToArrayAsync());
         Assert.True(await database.StaffRoleDocumentTypes.AnyAsync(requirement => requirement.StaffRoleId == 2 && requirement.DocumentTypeId == 1));
@@ -58,10 +58,26 @@ public sealed class DocumentTypeTests
         Assert.Equal(new[] { "Forklift" }, (await service.GetLookupsAsync(default)).RoleRequiredDocuments[1]);
         Assert.True((await database.Documents.FindAsync(20))!.IsValid);
 
-        await service.SaveStaffRoleDocumentsAsync(1, new() { DocumentTypeIds = [] }, default);
+        await service.SaveStaffRoleDocumentsAsync(1, new() { DocumentTypeIds = [], ExpectedRevision = AssignmentRevision.Documents([2]) }, default);
 
         Assert.False(await database.StaffRoleDocumentTypes.AnyAsync(requirement => requirement.StaffRoleId == 1));
         Assert.True((await eligibility.GetAsync([worker], default))[20].IsReady);
+    }
+
+    [Fact]
+    public async Task StaleOrMissingRoleRevisionCannotOverwriteRequirements()
+    {
+        await using var database = Database();
+        var service = new StaffDataService(database);
+        var revision = (await service.GetDocumentTypeManagementAsync(default)).RoleRevisions[1];
+        await service.SaveStaffRoleDocumentsAsync(1, new() { DocumentTypeIds = [2], ExpectedRevision = revision }, default);
+        foreach (var stale in new[] { revision, "" })
+        {
+            var error = await Assert.ThrowsAsync<ApiException>(() => service.SaveStaffRoleDocumentsAsync(1,
+                new() { DocumentTypeIds = [], ExpectedRevision = stale }, default));
+            Assert.Equal(409, error.StatusCode);
+        }
+        Assert.Equal(new[] { 2 }, await database.StaffRoleDocumentTypes.Where(requirement => requirement.StaffRoleId == 1).Select(requirement => requirement.DocumentTypeId).ToArrayAsync());
     }
 
     [Fact]

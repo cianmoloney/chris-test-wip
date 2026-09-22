@@ -134,13 +134,18 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    await next(context);
+});
+
 app.UseRouting();
 app.UseRequestLocalization();
 app.UseRateLimiter();
 app.Use(async (context, next) =>
 {
-    context.Response.Headers["Referrer-Policy"] = "no-referrer";
-    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers.CacheControl = "no-store";
     await next(context);
 });
@@ -148,7 +153,7 @@ app.Use(async (context, next) =>
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapStaticAssets();
+app.MapStaticAssets().ShortCircuit();
 app.MapRazorPages()
    .WithStaticAssets();
 

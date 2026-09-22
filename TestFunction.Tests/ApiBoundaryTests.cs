@@ -591,7 +591,11 @@ public sealed class ApiBoundaryTests
         var create = Request("{\"name\":\"Brick Layer\"}");
         create.Method = "POST";
         create.Path = "/api/staff-roles";
-        var update = Request("{\"documentTypeIds\":[1,2]}");
+        var update = Request(System.Text.Json.JsonSerializer.Serialize(new SaveStaffRoleDocumentsRequest
+        {
+            DocumentTypeIds = [1, 2],
+            ExpectedRevision = AssignmentRevision.Documents(await database.StaffRoleDocumentTypes.Where(requirement => requirement.StaffRoleId == 1).Select(requirement => requirement.DocumentTypeId).ToListAsync())
+        }, ApiJson.Options));
         update.Method = "PUT";
         update.Path = "/api/staff-roles/1/document-types";
 
@@ -632,7 +636,9 @@ public sealed class ApiBoundaryTests
         await database.SaveChangesAsync();
         using var services = Services(database);
 
-        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance).SaveStaffRoleDocuments(Request(body), 1, default);
+        var input = System.Text.Json.Nodes.JsonNode.Parse(body)!.AsObject();
+        input["expectedRevision"] = AssignmentRevision.Documents([1]);
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance).SaveStaffRoleDocuments(Request(input.ToJsonString()), 1, default);
 
         if (status == 204)
         {
@@ -664,7 +670,11 @@ public sealed class ApiBoundaryTests
         await database.SaveChangesAsync();
         using var services = Services(database);
         var api = new API(new AllowRequests(), services, NullLogger<API>.Instance);
-        var update = Request("{\"responsibilities\":[\"Staff.Read\",\"Staff.Write\"]}");
+        var update = Request(System.Text.Json.JsonSerializer.Serialize(new SaveRoleResponsibilitiesRequest
+        {
+            Responsibilities = [Permissions.StaffRead, Permissions.StaffWrite],
+            ExpectedRevision = AssignmentRevision.Responsibilities(await database.Responsibilities.Where(permission => permission.RoleId == 3 && permission.IsEnabled).Select(permission => permission.Name).ToListAsync())
+        }, ApiJson.Options));
         update.Method = "PUT";
         update.Path = "/api/roles/3/responsibilities";
 
@@ -697,11 +707,24 @@ public sealed class ApiBoundaryTests
         using var services = Services(database);
         var before = await database.Responsibilities.CountAsync(responsibility => responsibility.IsEnabled);
 
+        var input = System.Text.Json.Nodes.JsonNode.Parse(body)!.AsObject();
+        input["expectedRevision"] = AssignmentRevision.Responsibilities([]);
         var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance)
-            .UpdateRoleResponsibilities(Request(body), roleId, default);
+            .UpdateRoleResponsibilities(Request(input.ToJsonString()), roleId, default);
 
         Assert.Equal(status, Assert.IsType<ObjectResult>(result).StatusCode);
         Assert.Equal(before, await database.Responsibilities.CountAsync(responsibility => responsibility.IsEnabled));
+    }
+
+    [Fact]
+    public async Task AssignmentSavesRequireAnExplicitRevision()
+    {
+        await using var database = Database();
+        using var services = Services(database);
+        var api = new API(new AllowRequests(), services, NullLogger<API>.Instance);
+        Assert.Equal(400, Assert.IsType<ObjectResult>(await api.SaveStaffRoleDocuments(Request("{\"documentTypeIds\":[]}"), 1, default)).StatusCode);
+        Assert.Equal(400, Assert.IsType<ObjectResult>(await api.UpdateRoleResponsibilities(Request("{\"responsibilities\":[]}"), 3, default)).StatusCode);
+        Assert.Empty(await database.AuditEntries.ToListAsync());
     }
 
     [Fact]

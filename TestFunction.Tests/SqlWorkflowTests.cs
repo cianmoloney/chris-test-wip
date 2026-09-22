@@ -1,5 +1,11 @@
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Data.Common;
 using TestFunction.Data;
 using TestFunction.Services;
 using TestShared;
@@ -24,13 +30,77 @@ public sealed class SqlWorkflowTests
     private static LinkService Links(AppDbContext database) => new(database, new StaffDataService(database), TimeProvider.System);
 
     [SqlFact]
+    public async Task CurrentAccountQueriesSessionOncePerHttpRequestAndRejectsDisabledAccountOnNextRequest()
+    {
+        await using var creator = Database();
+        var roleId = await creator.Roles.Where(role => role.Name == "Admin").Select(role => role.Id).SingleAsync();
+        var user = new User { Email = $"{Guid.NewGuid():N}@example.test", RoleId = roleId, PasswordHash = "unused" };
+        var token = AccountService.NewToken();
+        creator.UserSessions.Add(new() { TokenHash = AccountService.HashToken(token), User = user, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1) });
+        await creator.SaveChangesAsync();
+        var queries = new SessionQueryCounter();
+        await using var database = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(Environment.GetEnvironmentVariable("HR_TEST_SQL"), options => options.EnableRetryOnFailure())
+            .AddInterceptors(queries).Options);
+        var accounts = new AccountService(database, new NoRoleTestEmail(), TimeProvider.System);
+        using var services = new ServiceCollection().AddSingleton(accounts)
+            .AddSingleton<IStaffDataService>(new StaffDataService(database)).BuildServiceProvider();
+        var authorization = new SessionTestAuthorization();
+        var api = new TestFunction.API(authorization, services, NullLogger<TestFunction.API>.Instance);
+        HttpRequest Request()
+        {
+            var request = new DefaultHttpContext().Request;
+            request.Headers["X-User-Session"] = token;
+            return request;
+        }
+
+        var first = Request();
+        var result = Assert.IsType<UserResponse>(Assert.IsType<OkObjectResult>(await api.CurrentAccount(first, default)).Value);
+        Assert.Equal(user.Id, result.Id);
+        Assert.Equal(1, queries.Count);
+        Assert.Equal(403, (await Assert.ThrowsAsync<ApiException>(() => accounts.RequireAsync(first, "Not.Granted", default))).StatusCode);
+        await accounts.RequireAdminAsync(first, default);
+        Assert.Equal(1, queries.Count);
+
+        Assert.IsType<OkObjectResult>(await api.CurrentAccount(Request(), default));
+        Assert.Equal(2, queries.Count);
+        user.IsEnabled = false;
+        await creator.SaveChangesAsync();
+        Assert.Equal(401, Assert.IsType<ObjectResult>(await api.CurrentAccount(Request(), default)).StatusCode);
+        Assert.Equal(3, queries.Count);
+        Assert.Equal(3, authorization.Calls);
+    }
+
+    private sealed class SessionQueryCounter : DbCommandInterceptor
+    {
+        public int Count { get; private set; }
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(DbCommand command,
+            CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+                && command.CommandText.Contains("[UserSessions]", StringComparison.Ordinal)) Count++;
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class SessionTestAuthorization : IApiAuthorization
+    {
+        public int Calls { get; private set; }
+        public Task<int> AuthorizeAsync(HttpRequest request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(0);
+        }
+    }
+
+    [SqlFact]
     public async Task RoleResponsibilityChangesPersistAndAffectExistingSqlSessions()
     {
         await using var database = Database();
         await database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
             database.ChangeTracker.Clear();
-            await using var transaction = await database.Database.BeginTransactionAsync();
+            await using var transaction = await database.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
             var adminRole = await database.Roles.SingleAsync(role => role.Name == "Admin");
             var foremanRole = await database.Roles.SingleAsync(role => role.Name == "Foreman");
             var admin = new User { Email = $"{Guid.NewGuid():N}@example.test", RoleId = adminRole.Id, PasswordHash = "unused" };
@@ -45,12 +115,14 @@ public sealed class SqlWorkflowTests
             request.Headers["X-User-Session"] = token;
 
             await service.SaveRoleResponsibilitiesAsync(actor, foremanRole.Id,
-                new() { Responsibilities = [Permissions.StaffRead, Permissions.DocumentsWrite] }, default);
+                new() { Responsibilities = [Permissions.StaffRead, Permissions.DocumentsWrite], ExpectedRevision = (await service.ListRolesAsync(actor, default)).Roles.Single(role => role.Id == foremanRole.Id).Revision }, default);
             database.ChangeTracker.Clear();
             Assert.Contains(Permissions.DocumentsWrite, (await service.RequireAsync(request, Permissions.DocumentsWrite, default)).Permissions);
-            await service.SaveRoleResponsibilitiesAsync(actor, foremanRole.Id, new() { Responsibilities = [] }, default);
+            await service.SaveRoleResponsibilitiesAsync(actor, foremanRole.Id, new() { Responsibilities = [], ExpectedRevision = AssignmentRevision.Responsibilities([Permissions.StaffRead, Permissions.DocumentsWrite]) }, default);
             database.ChangeTracker.Clear();
 
+            request = new Microsoft.AspNetCore.Http.DefaultHttpContext().Request;
+            request.Headers["X-User-Session"] = token;
             Assert.Empty((await service.RequireAsync(request, null, default)).Permissions);
             Assert.Equal(403, (await Assert.ThrowsAsync<ApiException>(() => service.RequireAsync(request, Permissions.DocumentsWrite, default))).StatusCode);
             var responsibilities = await database.Responsibilities.Where(responsibility => responsibility.RoleId == foremanRole.Id).ToListAsync();
@@ -64,6 +136,67 @@ public sealed class SqlWorkflowTests
     private sealed class NoRoleTestEmail : IEmailService
     {
         public Task SendAsync(string recipient, string subject, string text, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    [SqlFact]
+    public async Task ConcurrentStaffRoleSavesRejectOneStaleWriter()
+    {
+        await using var database = Database();
+        var service = new StaffDataService(database);
+        var role = await service.CreateStaffRoleAsync(new() { Name = "Concurrency " + Guid.NewGuid().ToString("N") }, default);
+        var typeIds = await database.DocumentTypes.OrderBy(type => type.Id).Take(2).Select(type => type.Id).ToArrayAsync();
+        Assert.Equal(2, typeIds.Length);
+        var revision = AssignmentRevision.Documents([]);
+        async Task<int> SaveAsync(int typeId)
+        {
+            await using var attempt = Database();
+            try
+            {
+                await new StaffDataService(attempt).SaveStaffRoleDocumentsAsync(role.Id,
+                    new() { DocumentTypeIds = [typeId], ExpectedRevision = revision }, default);
+                return typeId;
+            }
+            catch (ApiException exception) when (exception.StatusCode == 409) { return 0; }
+        }
+
+        var results = await Task.WhenAll(SaveAsync(typeIds[0]), SaveAsync(typeIds[1]));
+
+        var winner = Assert.Single(results, result => result != 0);
+        Assert.Single(results, result => result == 0);
+        Assert.Equal(winner, await database.StaffRoleDocumentTypes.Where(requirement => requirement.StaffRoleId == role.Id)
+            .Select(requirement => requirement.DocumentTypeId).SingleAsync());
+    }
+
+    [SqlFact]
+    public async Task ConcurrentOfficeRoleSavesRejectOneStaleWriterWithoutDuplicateAudit()
+    {
+        await using var database = Database();
+        var role = new Role { Name = "Concurrency " + Guid.NewGuid().ToString("N") };
+        var adminRoleId = await database.Roles.Where(candidate => candidate.Name == "Admin").Select(candidate => candidate.Id).SingleAsync();
+        var admin = new User { Email = $"{Guid.NewGuid():N}@example.test", RoleId = adminRoleId, PasswordHash = "unused" };
+        database.Roles.Add(role);
+        database.Users.Add(admin);
+        await database.SaveChangesAsync();
+        var actor = new UserResponse(admin.Id, admin.Email, adminRoleId, "Admin", true, false, []);
+        var revision = AssignmentRevision.Responsibilities([]);
+        async Task<bool> SaveAsync(List<string> permissions)
+        {
+            await using var attempt = Database();
+            try
+            {
+                await new AccountService(attempt, new NoRoleTestEmail(), TimeProvider.System).SaveRoleResponsibilitiesAsync(actor, role.Id,
+                    new() { Responsibilities = permissions, ExpectedRevision = revision }, default);
+                return true;
+            }
+            catch (ApiException exception) when (exception.StatusCode == 409) { return false; }
+        }
+
+        var results = await Task.WhenAll(SaveAsync([Permissions.StaffRead]), SaveAsync([Permissions.UsersWrite]));
+
+        Assert.Single(results, result => result);
+        Assert.Single(results, result => !result);
+        Assert.Single(await database.Responsibilities.Where(permission => permission.RoleId == role.Id && permission.IsEnabled).ToListAsync());
+        Assert.Single(await database.AuditEntries.Where(entry => entry.UserId == admin.Id && entry.Action == "Role.Responsibilities").ToListAsync());
     }
 
     [SqlFact]
@@ -238,7 +371,7 @@ public sealed class SqlWorkflowTests
         var otherRole = await service.CreateStaffRoleAsync(new() { Name = "Other role " + suffix }, default);
         var type = await service.CreateDocumentTypeAsync(new() { Name = "Type " + suffix, TextIdentifier = "CERTIFICATE", StaffRoleIds = [otherRole.Id] }, default);
 
-        await service.SaveStaffRoleDocumentsAsync(role.Id, new() { DocumentTypeIds = [type.Id, type.Id] }, default);
+        await service.SaveStaffRoleDocumentsAsync(role.Id, new() { DocumentTypeIds = [type.Id, type.Id], ExpectedRevision = AssignmentRevision.Documents([]) }, default);
         database.ChangeTracker.Clear();
 
         var data = await service.GetDocumentTypeManagementAsync(default);
@@ -250,7 +383,7 @@ public sealed class SqlWorkflowTests
         database.ChangeTracker.Clear();
         Assert.True(await database.StaffRoleDocumentTypes.AnyAsync(requirement => requirement.StaffRoleId == role.Id && requirement.DocumentTypeId == type.Id));
 
-        await service.SaveStaffRoleDocumentsAsync(role.Id, new() { DocumentTypeIds = [] }, default);
+        await service.SaveStaffRoleDocumentsAsync(role.Id, new() { DocumentTypeIds = [], ExpectedRevision = AssignmentRevision.Documents([type.Id]) }, default);
         database.ChangeTracker.Clear();
 
         Assert.False(await database.StaffRoleDocumentTypes.AnyAsync(requirement => requirement.StaffRoleId == role.Id));

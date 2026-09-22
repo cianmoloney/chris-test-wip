@@ -5,7 +5,7 @@
 <h1>Role Manager</h1>
 @if (Model.StatusMessage is not null)
 {
-    <div class="alert alert-success" role="status">@Model.StatusMessage</div>
+    <div class="alert alert-success" role="status" data-selection-message>@Model.StatusMessage</div>
 }
 
 @if (Model.Mode == "requirements")
@@ -13,34 +13,35 @@
     <div class="d-flex gap-3 flex-wrap align-items-end mb-4">
         @if (Model.Data.StaffRoles.Count > 0)
         {
-            <form method="get">
+            <form method="get" data-role-selector>
                 <label asp-for="RoleId" class="form-label">Staff role</label>
-                <select asp-for="RoleId" class="form-select" onchange="this.form.requestSubmit()">
+                <select asp-for="RoleId" class="form-select">
                     @foreach (var role in Model.Data.StaffRoles)
-                    { <option value="@role.Id">@role.Name</option> }
+                    { <option value="@role.Id" data-revision="@Model.Data.RoleRevisions[role.Id]">@role.Name</option> }
                 </select>
                 <noscript><button type="submit" class="btn btn-outline-primary mt-2">Open role</button></noscript>
             </form>
         }
-        <a asp-page="/DocumentTypes" asp-route-mode="role" asp-route-roleId="@Model.RoleId" class="btn btn-outline-primary">Add staff role</a>
-        <a asp-page="/DocumentTypes" asp-route-mode="type" asp-route-roleId="@Model.RoleId" class="btn btn-outline-secondary">Add document type</a>
+        <a asp-page="/DocumentTypes" asp-route-mode="role" asp-route-roleId="@Model.RoleId" class="btn btn-outline-primary" data-role-target>Add staff role</a>
+        <a asp-page="/DocumentTypes" asp-route-mode="type" asp-route-roleId="@Model.RoleId" class="btn btn-outline-secondary" data-role-target>Add document type</a>
     </div>
     @if (Model.SelectedRole is { } selected)
     {
-        <form method="post" asp-route-mode="requirements" asp-route-roleId="@selected.Id" class="border-top pt-3">
-            <div asp-validation-summary="All" class="text-danger" role="alert"></div>
+        <form method="post" asp-route-mode="requirements" asp-route-roleId="@selected.Id" class="border-top pt-3" data-role-requirements>
+            <input type="hidden" asp-for="Requirements.ExpectedRevision" data-role-revision />
+            <div asp-validation-summary="All" class="text-danger" role="alert" data-selection-message></div>
             <fieldset>
-                <legend class="h4 text-break">Required documents: @selected.Name</legend>
+                <legend class="h4 text-break">Required documents: <span data-role-name>@selected.Name</span></legend>
                 @foreach (var type in Model.Data.DocumentTypes)
                 {
                     <div class="d-flex gap-3 justify-content-between align-items-start border-bottom py-3">
                         <div class="form-check text-break">
                             <input type="checkbox" id="type-@type.Id" name="Requirements.DocumentTypeIds" value="@type.Id"
-                                   checked="@(Model.Requirements.DocumentTypeIds.Contains(type.Id))" class="form-check-input" />
+                                checked="@(Model.Requirements.DocumentTypeIds.Contains(type.Id))" class="form-check-input" data-role-ids="@string.Join(",", type.StaffRoleIds)" />
                             <label for="type-@type.Id" class="form-check-label">@type.Name</label>
                             <div class="small text-muted">Text identifier: @(string.IsNullOrWhiteSpace(type.TextIdentifier) ? "Not configured" : type.TextIdentifier)</div>
                         </div>
-                        <a asp-page="/DocumentTypes" asp-route-mode="type" asp-route-id="@type.Id" asp-route-roleId="@selected.Id" aria-label="Edit @type.Name">Edit</a>
+                        <a asp-page="/DocumentTypes" asp-route-mode="type" asp-route-id="@type.Id" asp-route-roleId="@selected.Id" aria-label="Edit @type.Name" data-role-target>Edit</a>
                     </div>
                 }
                 @if (Model.Data.DocumentTypes.Count == 0)

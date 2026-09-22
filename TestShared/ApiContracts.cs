@@ -11,7 +11,11 @@ public sealed record LookupResponse(int Id, string Name, string? Prefix = null);
 public sealed record DocumentTypeResponse(int Id, string Name, string? TextIdentifier, List<int> StaffRoleIds);
 
 /// <summary>Document types and available staff roles for HR management.</summary>
-public sealed record DocumentTypeManagementResponse(List<DocumentTypeResponse> DocumentTypes, List<LookupResponse> StaffRoles);
+public sealed record DocumentTypeManagementResponse(List<DocumentTypeResponse> DocumentTypes, List<LookupResponse> StaffRoles)
+{
+    public Dictionary<int, string> RoleRevisions => StaffRoles.ToDictionary(role => role.Id,
+        role => AssignmentRevision.Documents(DocumentTypes.Where(type => type.StaffRoleIds.Contains(role.Id)).Select(type => type.Id)));
+}
 
 /// <summary>A new staff job role, separate from office-user access roles.</summary>
 public sealed record CreateStaffRoleRequest
@@ -23,6 +27,7 @@ public sealed record CreateStaffRoleRequest
 public sealed record SaveStaffRoleDocumentsRequest
 {
     [JsonRequired, Required, MaxLength(256)] public List<int> DocumentTypeIds { get; init; } = [];
+    [Required, RegularExpression("^[A-F0-9]{64}$")] public string ExpectedRevision { get; init; } = "";
 }
 
 /// <summary>Editable document identification text and required-role associations.</summary>

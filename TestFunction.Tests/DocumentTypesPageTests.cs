@@ -93,7 +93,7 @@ public sealed class DocumentTypesPageTests
         using var client = Client(handler);
         var page = Page(client);
         page.RoleId = 2;
-        page.Requirements = new() { DocumentTypeIds = selected ? [4] : [] };
+        page.Requirements = new() { DocumentTypeIds = selected ? [4] : [], ExpectedRevision = AssignmentRevision.Documents([]) };
         page.ModelState.AddModelError("Input.Name", "Unrelated type form is empty.");
         page.ModelState.AddModelError("RoleInput.Name", "Unrelated role form is empty.");
 
@@ -132,7 +132,7 @@ public sealed class DocumentTypesPageTests
         using var client = Client(handler);
         var page = Page(client);
         page.RoleId = 2;
-        page.Requirements = new() { DocumentTypeIds = [4] };
+        page.Requirements = new() { DocumentTypeIds = [4], ExpectedRevision = AssignmentRevision.Documents([]) };
 
         Assert.IsType<PageResult>(await page.OnPostAsync(default));
 
