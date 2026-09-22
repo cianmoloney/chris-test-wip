@@ -14,6 +14,59 @@ namespace TestFunction.Tests;
 
 public sealed class ManageTermsPageTests
 {
+    [Theory]
+    [InlineData(1)]
+    [InlineData(null)]
+    public async Task SavesSelectedRequiredRoleWithoutPublishing(int? roleId)
+    {
+        using var handler = new TermsHandler();
+        using var client = Client(handler);
+        var page = Page(client);
+        await page.OnGetAsync(default);
+        Assert.Equal(AssignmentRevision.TermsRole([]), page.RoleInput.ExpectedRevision);
+        Assert.Single(page.StaffRoles);
+        page.RoleInput = page.RoleInput with { StaffRoleIds = roleId is { } selected ? [selected] : [] };
+        page.ModelState.AddModelError("Input.English", "Inactive publishing form.");
+
+        var result = Assert.IsType<RedirectToPageResult>(await page.OnPostRoleAsync(default));
+
+        Assert.Equal(20, result.RouteValues!["DocumentId"]);
+        Assert.Equal(page.RoleInput.StaffRoleIds, handler.SavedRole!.StaffRoleIds);
+        Assert.Equal(page.RoleInput.ExpectedRevision, handler.SavedRole.ExpectedRevision);
+        Assert.Null(handler.Published);
+    }
+
+    [Fact]
+    public async Task RoleFailureRetainsDraftAndStaleRevision()
+    {
+        using var handler = new TermsHandler { RejectRole = true };
+        using var client = Client(handler);
+        var page = Page(client);
+        page.DocumentId = 20;
+        page.RoleInput = new() { StaffRoleIds = [1, 2], ExpectedRevision = AssignmentRevision.TermsRole([]) };
+
+        Assert.IsType<PageResult>(await page.OnPostRoleAsync(default));
+
+        Assert.Equal(new[] { 1, 2 }, page.RoleInput.StaffRoleIds);
+        Assert.Equal(AssignmentRevision.TermsRole([]), page.RoleInput.ExpectedRevision);
+        Assert.False(page.ModelState.IsValid);
+        Assert.Null(handler.Published);
+    }
+
+    [Fact]
+    public async Task RoleUpdateRequiresPermissionDocumentAndRevision()
+    {
+        using var handler = new TermsHandler();
+        using var client = Client(handler);
+        Assert.IsType<ForbidResult>(await Page(client, false).OnPostRoleAsync(default));
+        var page = Page(client);
+        Assert.IsType<BadRequestResult>(await page.OnPostRoleAsync(default));
+        page.DocumentId = 20;
+        Assert.IsType<PageResult>(await page.OnPostRoleAsync(default));
+        Assert.False(page.ModelState.IsValid);
+        Assert.Null(handler.SavedRole);
+    }
+
     [Fact]
     public async Task DefaultViewShowsExistingTermsAndLatestEnglishVersion()
     {
@@ -187,8 +240,21 @@ public sealed class ManageTermsPageTests
         public bool RejectPublish { get; init; }
         public string? HistoryPath { get; private set; }
         public PublishTermsRequest? Published { get; private set; }
+        public SaveTermsRoleRequest? SavedRole { get; private set; }
+        public bool RejectRole { get; init; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri!.AbsolutePath == "/lookups")
+                return new(HttpStatusCode.OK) { Content = JsonContent.Create(new LookupsResponse([], [new(1, "Driver")], [], new())) };
+            if (request.Method == HttpMethod.Put)
+            {
+                Assert.Equal("/terms/20/staff-roles", request.RequestUri.AbsolutePath);
+                SavedRole = await request.Content!.ReadFromJsonAsync<SaveTermsRoleRequest>(cancellationToken);
+                return RejectRole ? new(HttpStatusCode.Conflict)
+                {
+                    Content = JsonContent.Create(new ValidationProblemDetails { Status = 409, Detail = "Required role changed. Reload before saving." }, mediaType: new("application/problem+json"))
+                } : new(HttpStatusCode.NoContent);
+            }
             if (request.Method == HttpMethod.Post)
             {
                 Assert.Equal("/terms", request.RequestUri!.AbsolutePath);

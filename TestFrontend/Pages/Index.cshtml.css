@@ -1,0 +1,39 @@
+.quick-actions {
+  padding-block: 1.5rem;
+}
+
+.quick-actions ::deep .quick-action {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  width: 100%;
+  min-height: 136px;
+  padding: 1.5rem;
+  border-radius: 8px;
+  background-color: #1261b5;
+  border-color: #1261b5;
+  color: #fff;
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: left;
+  letter-spacing: 0;
+}
+
+.quick-actions ::deep .quick-action:hover {
+  background-color: #0d4c91;
+  border-color: #0d4c91;
+}
+
+.quick-actions ::deep .quick-action:focus-visible {
+  outline: 3px solid #172e45;
+  outline-offset: 3px;
+}
+
+.quick-actions ::deep .quick-action img {
+  flex: 0 0 32px;
+  filter: brightness(0) invert(1);
+}
+
+.quick-action span {
+  overflow-wrap: anywhere;
+}

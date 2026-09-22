@@ -1,27 +1,47 @@
 ﻿@page
 @model IndexModel
 @{
-    ViewData["Title"] = "Home page";
+    ViewData["Title"] = "Quick Actions";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
+<section class="quick-actions" aria-labelledby="quick-actions-title">
+    <h1 id="quick-actions-title">Quick Actions</h1>
 
-    <div class="list-group mt-4">
+    <div class="row g-3 mt-2">
         @if (User.HasClaim("permission", TestShared.Permissions.LinksWrite))
         {
-        <a asp-page="/GenerateLink" class="list-group-item list-group-item-action">
-            Generate secure link for Staff
-        </a>
+        <div class="col-12 col-md-6">
+            <a asp-page="/GenerateLink" class="btn btn-primary quick-action">
+                <img src="~/lib/lucide/link.svg" width="32" height="32" alt="" />
+                <span>Staff Links</span>
+            </a>
+        </div>
         }
         @if (User.HasClaim("permission", TestShared.Permissions.StaffRead))
         {
-        <a asp-page="/Files" class="list-group-item list-group-item-action">
-            Uploaded Files
-        </a>
-        <a asp-page="/Staff" class="list-group-item list-group-item-action">
-            Staff Viewer
-        </a>
+        <div class="col-12 col-md-6">
+            <a asp-page="/Documents" class="btn btn-primary quick-action">
+                <img src="~/lib/lucide/files.svg" width="32" height="32" alt="" />
+                <span>Document Explorer</span>
+            </a>
+        </div>
+        <div class="col-12 col-md-6">
+            <a asp-page="/Staff" class="btn btn-primary quick-action">
+                <img src="~/lib/lucide/users-round.svg" width="32" height="32" alt="" />
+                <span>Staff Viewer</span>
+            </a>
+        </div>
+        }
+        @if (User.HasClaim("permission", TestShared.Permissions.StaffRead)
+            && User.HasClaim("permission", TestShared.Permissions.DocumentsWrite)
+            && User.HasClaim("permission", TestShared.Permissions.LinksWrite))
+        {
+        <div class="col-12 col-md-6">
+            <a asp-page="/UploadFile" class="btn btn-primary quick-action">
+                <img src="~/lib/lucide/upload.svg" width="32" height="32" alt="" />
+                <span>Upload File</span>
+            </a>
+        </div>
         }
     </div>
-</div>
+</section>

@@ -1,0 +1,3 @@
+.upload-file ::deep .upload-icon {
+  filter: brightness(0) invert(1);
+}

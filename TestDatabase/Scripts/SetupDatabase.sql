@@ -49,7 +49,13 @@ BEGIN TRY
     (
         [Id] INT IDENTITY(1,1) NOT NULL CONSTRAINT [PK_DocumentTypes] PRIMARY KEY,
         [Name] NVARCHAR(128) NOT NULL CONSTRAINT [UQ_DocumentTypes_Name] UNIQUE,
-        [TextIdentifier] NVARCHAR(256) NULL
+        [TextIdentifier] NVARCHAR(256) NULL,
+        [StartDateLabel] NVARCHAR(128) NULL,
+        [ExpiryDateLabel] NVARCHAR(128) NULL,
+        [DocumentNumberLabel] NVARCHAR(128) NULL,
+        [ExtractedNameLabel] NVARCHAR(128) NULL,
+        [EmailLabel] NVARCHAR(128) NULL,
+        [PhoneLabel] NVARCHAR(128) NULL
     );
 
     CREATE TABLE [dbo].[Roles]
@@ -126,6 +132,18 @@ BEGIN TRY
         [Title] NVARCHAR(256) NOT NULL,
         [CreatedAt] DATETIMEOFFSET NOT NULL CONSTRAINT [DF_TermsDocuments_CreatedAt] DEFAULT (SYSDATETIMEOFFSET())
     );
+
+    CREATE TABLE [dbo].[StaffRoleTermsDocuments]
+    (
+        [StaffRoleId] INT NOT NULL,
+        [TermsDocumentId] INT NOT NULL,
+        CONSTRAINT [PK_StaffRoleTermsDocuments] PRIMARY KEY ([StaffRoleId], [TermsDocumentId]),
+        CONSTRAINT [FK_StaffRoleTermsDocuments_StaffRoles] FOREIGN KEY ([StaffRoleId])
+            REFERENCES [dbo].[StaffRoles] ([Id]) ON DELETE CASCADE,
+        CONSTRAINT [FK_StaffRoleTermsDocuments_TermsDocuments] FOREIGN KEY ([TermsDocumentId])
+            REFERENCES [dbo].[TermsDocuments] ([Id]) ON DELETE CASCADE
+    );
+    CREATE INDEX [IX_StaffRoleTermsDocuments_TermsDocumentId] ON [dbo].[StaffRoleTermsDocuments] ([TermsDocumentId]);
 
     CREATE TABLE [dbo].[TermsDocumentVersions]
     (
@@ -276,7 +294,7 @@ BEGIN TRY
         (@TermsId, N'Погоджуючись, ви підтверджуєте, що надана вами інформація є точною, що всі завантажені сертифікати є справжніми, і що ви дотримуватиметеся всіх вимог безпеки та правил поведінки, які застосовуються до вашої ролі.', N'uk', 1, 1);
 
     COMMIT TRANSACTION;
-    PRINT N'Setup complete: 17 tables, StaffNumbers sequence, constraints, indexes and reference data created.';
+    PRINT N'Setup complete: application tables, StaffNumbers sequence, constraints, indexes and reference data created.';
 END TRY
 BEGIN CATCH
     IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;

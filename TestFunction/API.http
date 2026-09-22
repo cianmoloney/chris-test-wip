@@ -195,6 +195,19 @@ Content-Type: application/json
   "expiryDate": "2027-01-01T00:00:00Z"
 }
 
+### List shared terms documents including staffRoleIds and roleRevision
+GET {{baseUrl}}/terms
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Require a terms document for multiple roles (Terms.Write; use [] to clear)
+PUT {{baseUrl}}/terms/1/staff-roles
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "staffRoleIds": [1, 2], "expectedRevision": "REPLACE_WITH_ROLE_REVISION_FROM_GET_TERMS" }
+
 ### Browse all versions and languages of a terms document (requires Terms.Write)
 GET {{baseUrl}}/terms/1/versions
 Authorization: Bearer {{token}}

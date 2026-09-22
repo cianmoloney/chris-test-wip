@@ -143,6 +143,7 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
             Name = request.Name.Trim(), TextIdentifier = request.TextIdentifier.Trim(),
             RequiredByRoles = roleIds.Select(roleId => new StaffRoleDocumentType { StaffRoleId = roleId }).ToList()
         };
+        ApplyFieldLabels(type, request);
         database.DocumentTypes.Add(type);
         await database.SaveChangesAsync(cancellationToken);
         return MapDocumentType(type);
@@ -155,6 +156,7 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
         var roleIds = await ValidateDocumentTypeRequestAsync(request, id, cancellationToken);
         type.Name = request.Name.Trim();
         type.TextIdentifier = request.TextIdentifier.Trim();
+        ApplyFieldLabels(type, request);
         database.StaffRoleDocumentTypes.RemoveRange(type.RequiredByRoles.Where(role => !roleIds.Contains(role.StaffRoleId)));
         foreach (var roleId in roleIds.Where(roleId => !type.RequiredByRoles.Any(role => role.StaffRoleId == roleId)))
             type.RequiredByRoles.Add(new StaffRoleDocumentType { StaffRoleId = roleId });
@@ -167,6 +169,14 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
             throw new ApiException(400, "Enter a document type name of up to 128 characters.", "Name");
         if (string.IsNullOrWhiteSpace(request.TextIdentifier) || request.TextIdentifier.Length > 256)
             throw new ApiException(400, "Enter identifying text of up to 256 characters.", "TextIdentifier");
+        foreach (var (field, label) in new[]
+        {
+            (nameof(request.StartDateLabel), request.StartDateLabel), (nameof(request.ExpiryDateLabel), request.ExpiryDateLabel),
+            (nameof(request.DocumentNumberLabel), request.DocumentNumberLabel), (nameof(request.ExtractedNameLabel), request.ExtractedNameLabel),
+            (nameof(request.EmailLabel), request.EmailLabel), (nameof(request.PhoneLabel), request.PhoneLabel)
+        })
+            if (label?.Length > 128)
+                throw new ApiException(400, "Enter a field label of up to 128 characters.", field);
         if (request.StaffRoleIds is null || request.StaffRoleIds.Count > 256)
             throw new ApiException(400, "Select valid staff roles.", "StaffRoleIds");
         var name = request.Name.Trim().ToUpperInvariant();
@@ -178,8 +188,25 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
         return roleIds;
     }
 
+    private static void ApplyFieldLabels(DocumentType type, SaveDocumentTypeRequest request)
+    {
+        type.StartDateLabel = NormalizeLabel(request.StartDateLabel);
+        type.ExpiryDateLabel = NormalizeLabel(request.ExpiryDateLabel);
+        type.DocumentNumberLabel = NormalizeLabel(request.DocumentNumberLabel);
+        type.ExtractedNameLabel = NormalizeLabel(request.ExtractedNameLabel);
+        type.EmailLabel = NormalizeLabel(request.EmailLabel);
+        type.PhoneLabel = NormalizeLabel(request.PhoneLabel);
+    }
+
+    private static string? NormalizeLabel(string? label) => string.IsNullOrWhiteSpace(label) ? null : label.Trim();
+
     private static DocumentTypeResponse MapDocumentType(DocumentType type) =>
-        new(type.Id, type.Name, type.TextIdentifier, type.RequiredByRoles.Select(role => role.StaffRoleId).Order().ToList());
+        new(type.Id, type.Name, type.TextIdentifier, type.RequiredByRoles.Select(role => role.StaffRoleId).Order().ToList())
+        {
+            StartDateLabel = type.StartDateLabel, ExpiryDateLabel = type.ExpiryDateLabel,
+            DocumentNumberLabel = type.DocumentNumberLabel, ExtractedNameLabel = type.ExtractedNameLabel,
+            EmailLabel = type.EmailLabel, PhoneLabel = type.PhoneLabel
+        };
 
     public async Task<StaffResponse> CreateStaffAsync(CreateStaffRequest request, CancellationToken cancellationToken)
     {
@@ -380,7 +407,8 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
             throw NotFound();
         var version = await database.TermsDocumentVersions.Include(version => version.TermsDocument)
             .FirstOrDefaultAsync(version => version.Id == request.TermsDocumentVersionId, cancellationToken) ?? throw NotFound();
-        if (!version.IsActive)
+        if (!version.IsActive || await database.TermsDocumentVersions.AnyAsync(candidate => candidate.TermsDocumentId == version.TermsDocumentId
+            && candidate.Version > version.Version, cancellationToken))
             throw new ApiException(409, "The terms have changed. Please reload and review the current version.");
         if (!await database.StaffTermsAssignments.AnyAsync(assignment => assignment.StaffId == staffId
             && assignment.TermsDocumentId == version.TermsDocumentId && assignment.Version == version.Version, cancellationToken))

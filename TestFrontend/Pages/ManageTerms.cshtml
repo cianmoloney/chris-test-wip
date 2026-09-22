@@ -1,11 +1,11 @@
 @page
 @model TestFrontend.Pages.ManageTermsModel
 @{
-    ViewData["Title"] = "Manage Terms";
+    ViewData["Title"] = "Terms";
     string LanguageName(string language) => language switch { "en" => "English", "pl" => "Polish", "uk" => "Ukrainian", _ => language };
 }
 
-<h1>Manage Terms</h1>
+<h1>Terms</h1>
 @if (Model.StatusMessage is not null)
 {
     <div class="alert alert-success" role="status">@Model.StatusMessage</div>
@@ -47,6 +47,29 @@
                 </form>
             }
         </div>
+    }
+
+    @if (Model.SelectedDocument is not null)
+    {
+        <form method="post" asp-page-handler="Role" asp-route-mode="view" asp-route-documentId="@Model.DocumentId" asp-route-versionId="@Model.VersionId" class="mb-4">
+            <div asp-validation-summary="All" class="text-danger" role="alert"></div>
+            <input asp-for="RoleInput.ExpectedRevision" type="hidden" />
+            <fieldset class="mb-3">
+                <legend class="h6">Required for staff roles</legend>
+                <div class="d-flex gap-3 flex-wrap">
+                    @foreach (var role in Model.StaffRoles)
+                    {
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="terms-role-@role.Id" name="RoleInput.StaffRoleIds"
+                                   value="@role.Id" checked="@Model.RoleInput.StaffRoleIds.Contains(role.Id)" />
+                            <label class="form-check-label text-break" for="terms-role-@role.Id">@role.Name</label>
+                        </div>
+                    }
+                </div>
+            </fieldset>
+            <button type="submit" class="btn btn-outline-primary">Save required roles</button>
+            <span asp-validation-for="RoleInput.StaffRoleIds" class="text-danger"></span>
+        </form>
     }
 
     <div class="d-flex gap-2 flex-wrap mb-4">

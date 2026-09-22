@@ -8,7 +8,15 @@ namespace TestShared;
 public sealed record LookupResponse(int Id, string Name, string? Prefix = null);
 
 /// <summary>A document type and the staff roles that require it.</summary>
-public sealed record DocumentTypeResponse(int Id, string Name, string? TextIdentifier, List<int> StaffRoleIds);
+public sealed record DocumentTypeResponse(int Id, string Name, string? TextIdentifier, List<int> StaffRoleIds)
+{
+    public string? StartDateLabel { get; init; }
+    public string? ExpiryDateLabel { get; init; }
+    public string? DocumentNumberLabel { get; init; }
+    public string? ExtractedNameLabel { get; init; }
+    public string? EmailLabel { get; init; }
+    public string? PhoneLabel { get; init; }
+}
 
 /// <summary>Document types and available staff roles for HR management.</summary>
 public sealed record DocumentTypeManagementResponse(List<DocumentTypeResponse> DocumentTypes, List<LookupResponse> StaffRoles)
@@ -35,6 +43,12 @@ public sealed record SaveDocumentTypeRequest
 {
     [Required, MaxLength(128)] public string Name { get; init; } = "";
     [Required, MaxLength(256)] public string TextIdentifier { get; init; } = "";
+    [MaxLength(128)] public string? StartDateLabel { get; init; }
+    [MaxLength(128)] public string? ExpiryDateLabel { get; init; }
+    [MaxLength(128)] public string? DocumentNumberLabel { get; init; }
+    [MaxLength(128)] public string? ExtractedNameLabel { get; init; }
+    [MaxLength(128)] public string? EmailLabel { get; init; }
+    [MaxLength(128)] public string? PhoneLabel { get; init; }
     [Required, MaxLength(256)] public List<int> StaffRoleIds { get; init; } = [];
 }
 
@@ -163,7 +177,11 @@ public sealed record UpdateStaffDocumentRequest
 }
 
 /// <summary>The title of a terms document.</summary>
-public sealed record TermsDocumentResponse(int Id, string Title);
+public sealed record TermsDocumentResponse(int Id, string Title)
+{
+    public List<int> StaffRoleIds { get; init; } = [];
+    public string RoleRevision => AssignmentRevision.TermsRole(StaffRoleIds);
+}
 
 /// <summary>A specific language and version of the terms text.</summary>
 public sealed record TermsVersionResponse(int Id, TermsDocumentResponse TermsDocument,

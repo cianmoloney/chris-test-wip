@@ -5,8 +5,15 @@
 }
 
 <h1>Staff</h1>
-@if (User.HasClaim("permission", TestShared.Permissions.StaffWrite))
-{ <a asp-page="/StaffNew" class="btn btn-primary mb-3">Add staff member</a> }
+@if (User.HasClaim("permission", TestShared.Permissions.StaffWrite) || User.HasClaim("permission", TestShared.Permissions.DocumentsWrite))
+{
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        @if (User.HasClaim("permission", TestShared.Permissions.StaffWrite))
+        { <a asp-page="/StaffNew" class="btn btn-primary">Add staff member</a> }
+        @if (User.HasClaim("permission", TestShared.Permissions.DocumentsWrite))
+        { <a asp-page="/DocumentTypes" class="btn btn-outline-secondary">Staff Roles &amp; Document Types</a> }
+    </div>
+}
 
 @if (Model.StatusMessage is not null)
 {

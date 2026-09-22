@@ -30,6 +30,127 @@ public sealed class SqlWorkflowTests
     private static LinkService Links(AppDbContext database) => new(database, new StaffDataService(database), TimeProvider.System);
 
     [SqlFact]
+    public async Task SharedTermsHaveOneHistoryAndRequireLatestAcceptanceInEveryRole()
+    {
+        await using var database = Database();
+        var staffData = new StaffDataService(database);
+        var firstRole = await staffData.CreateStaffRoleAsync(new() { Name = "Shared terms " + Guid.NewGuid().ToString("N") }, default);
+        var secondRole = await staffData.CreateStaffRoleAsync(new() { Name = "Shared terms " + Guid.NewGuid().ToString("N") }, default);
+        var first = await staffData.CreateStaffAsync(new() { FirstName = "Shared", LastName = "First", Email = $"{Guid.NewGuid():N}@example.test", StaffTypeId = 1, StaffRoleId = firstRole.Id }, default);
+        var second = await staffData.CreateStaffAsync(new() { FirstName = "Shared", LastName = "Second", Email = $"{Guid.NewGuid():N}@example.test", StaffTypeId = 1, StaffRoleId = secondRole.Id }, default);
+        var publisher = new TermsService(database);
+        var terms = await publisher.PublishAsync(1, new() { Title = "Shared policy " + Guid.NewGuid(), English = "Edition one", Polish = "Polish one", Ukrainian = "Ukrainian one" }, default);
+        await publisher.SaveRoleAsync(1, terms.Id, new() { StaffRoleIds = [firstRole.Id, secondRole.Id, firstRole.Id], ExpectedRevision = terms.RoleRevision }, default);
+        Assert.Equal(2, await database.StaffRoleTermsDocuments.CountAsync(requirement => requirement.TermsDocumentId == terms.Id));
+        var workers = await database.Staff.AsNoTracking().Where(worker => worker.Id == first.Id || worker.Id == second.Id).ToListAsync();
+        var eligibility = new EligibilityService(database, TimeProvider.System);
+        Assert.All((await eligibility.GetAsync(workers, default)).Values, result => Assert.False(result.IsReady));
+        var acceptedVersionIds = new List<int>();
+        foreach (var worker in workers)
+        {
+            var link = await Links(database).CreateAsync(1, new("terms", worker.Id, terms.Id), default);
+            var offered = (await Links(database).ResolveAsync(new(link.Token, "terms", "pl"), default)).Terms!;
+            acceptedVersionIds.Add(offered.Id);
+            await Links(database).AcceptAsync(new(link.Token, offered.Id, true), default);
+        }
+        Assert.Single(acceptedVersionIds.Distinct());
+        Assert.All((await eligibility.GetAsync(workers, default)).Values, result => Assert.True(result.IsReady));
+        var published = await publisher.PublishAsync(1, new() { TermsDocumentId = terms.Id, Title = terms.Title, English = "Edition two", Polish = "Polish two", Ukrainian = "Ukrainian two" }, default);
+        Assert.Equal(new[] { firstRole.Id, secondRole.Id }.Order(), published.StaffRoleIds);
+        Assert.All((await eligibility.GetAsync(workers, default)).Values, result => Assert.False(result.IsReady));
+        var latestLink = await Links(database).CreateAsync(1, new("terms", first.Id, terms.Id), default);
+        var latest = (await Links(database).ResolveAsync(new(latestLink.Token, "terms", "uk"), default)).Terms!;
+        await Links(database).AcceptAsync(new(latestLink.Token, latest.Id, true), default);
+        var readiness = await eligibility.GetAsync(workers, default);
+        Assert.True(readiness[first.Id].IsReady);
+        Assert.False(readiness[second.Id].IsReady);
+        await publisher.SaveRoleAsync(1, terms.Id, new() { StaffRoleIds = [secondRole.Id], ExpectedRevision = published.RoleRevision }, default);
+        Assert.Equal(secondRole.Id, (await database.StaffRoleTermsDocuments.AsNoTracking().SingleAsync(requirement => requirement.TermsDocumentId == terms.Id)).StaffRoleId);
+        Assert.Single(await database.TermsDocuments.Where(document => document.Title == terms.Title).ToListAsync());
+        Assert.Equal(6, await database.TermsDocumentVersions.CountAsync(version => version.TermsDocumentId == terms.Id));
+        Assert.Equal(3, await database.StaffTermsAcceptances.CountAsync(acceptance => acceptance.TermsDocumentVersion.TermsDocumentId == terms.Id));
+        Assert.Equal("Polish one", (await database.TermsDocumentVersions.AsNoTracking().SingleAsync(version => version.Id == acceptedVersionIds[0])).Content);
+        await using var duplicate = Database();
+        duplicate.StaffRoleTermsDocuments.Add(new() { StaffRoleId = secondRole.Id, TermsDocumentId = terms.Id });
+        var error = await Assert.ThrowsAsync<DbUpdateException>(() => duplicate.SaveChangesAsync());
+        Assert.True(error.InnerException is SqlException { Number: 2601 or 2627 });
+    }
+
+    [SqlFact]
+    public async Task RoleTermsRequireEveryLatestEditionForExistingAndNewStaff()
+    {
+        await using var database = Database();
+        var staffData = new StaffDataService(database);
+        var role = await staffData.CreateStaffRoleAsync(new() { Name = "Terms " + Guid.NewGuid().ToString("N") }, default);
+        var existing = await staffData.CreateStaffAsync(new() { FirstName = "Terms", LastName = "Existing", Email = $"{Guid.NewGuid():N}@example.test", StaffTypeId = 1, StaffRoleId = role.Id }, default);
+        var publisher = new TermsService(database);
+        var safety = await publisher.PublishAsync(1, new() { Title = "Safety " + Guid.NewGuid(), English = "Safety one", Polish = "Safety PL", Ukrainian = "Safety UK" }, default);
+        var conduct = await publisher.PublishAsync(1, new() { Title = "Conduct " + Guid.NewGuid(), English = "Conduct one", Polish = "Conduct PL", Ukrainian = "Conduct UK" }, default);
+        foreach (var terms in new[] { safety, conduct })
+            await publisher.SaveRoleAsync(1, terms.Id, new() { StaffRoleIds = [role.Id], ExpectedRevision = terms.RoleRevision }, default);
+        var registration = await Links(database).CreateAsync(1, new("register", null, null), default);
+        var created = await Links(database).RegisterAsync(new(registration.Token,
+            new() { FirstName = "Terms", LastName = "New", Email = $"{Guid.NewGuid():N}@example.test", StaffTypeId = 1, StaffRoleId = role.Id }), default);
+        var workers = await database.Staff.AsNoTracking().Where(worker => worker.Id == existing.Id || worker.Id == created.Id).ToListAsync();
+        var eligibility = new EligibilityService(database, TimeProvider.System);
+        Assert.All((await eligibility.GetAsync(workers, default)).Values, readiness => { Assert.False(readiness.IsReady); Assert.Equal(2, readiness.Reasons.Count); });
+        Assert.False(await database.StaffTermsAssignments.AnyAsync(assignment => assignment.StaffId == existing.Id || assignment.StaffId == created.Id));
+
+        var safetyLink = await Links(database).CreateAsync(1, new("terms", existing.Id, safety.Id), default);
+        var safetyText = (await Links(database).ResolveAsync(new(safetyLink.Token, "terms", "pl"), default)).Terms!;
+        await Links(database).AcceptAsync(new(safetyLink.Token, safetyText.Id, true), default);
+        Assert.False((await eligibility.GetAsync(workers, default))[existing.Id].IsReady);
+        var conductLink = await Links(database).CreateAsync(1, new("terms", existing.Id, conduct.Id), default);
+        var conductText = (await Links(database).ResolveAsync(new(conductLink.Token, "terms", "uk"), default)).Terms!;
+        await Links(database).AcceptAsync(new(conductLink.Token, conductText.Id, true), default);
+        Assert.True((await eligibility.GetAsync(workers, default))[existing.Id].IsReady);
+        Assert.False((await eligibility.GetAsync(workers, default))[created.Id].IsReady);
+
+        await publisher.PublishAsync(1, new() { TermsDocumentId = safety.Id, Title = safety.Title, English = "Safety two", Polish = "Safety two PL", Ukrainian = "Safety two UK" }, default);
+        Assert.Equal(role.Id, (await database.StaffRoleTermsDocuments.AsNoTracking().SingleAsync(requirement => requirement.TermsDocumentId == safety.Id)).StaffRoleId);
+        Assert.False((await eligibility.GetAsync(workers, default))[existing.Id].IsReady);
+        Assert.Equal(409, (await Assert.ThrowsAsync<ApiException>(() => Links(database).AcceptAsync(new(safetyLink.Token, safetyText.Id, true), default))).StatusCode);
+        var latestLink = await Links(database).CreateAsync(1, new("terms", existing.Id, safety.Id), default);
+        var latest = (await Links(database).ResolveAsync(new(latestLink.Token, "terms", "en"), default)).Terms!;
+        Assert.Equal(2, latest.Version);
+        await Links(database).AcceptAsync(new(latestLink.Token, latest.Id, true), default);
+        Assert.True((await eligibility.GetAsync(workers, default))[existing.Id].IsReady);
+        Assert.Equal("Safety PL", (await database.TermsDocumentVersions.AsNoTracking().SingleAsync(version => version.Id == safetyText.Id)).Content);
+        Assert.Equal(3, await database.StaffTermsAcceptances.CountAsync(acceptance => acceptance.StaffId == existing.Id));
+        foreach (var terms in new[] { safety, conduct })
+            await publisher.SaveRoleAsync(1, terms.Id, new() { StaffRoleIds = [], ExpectedRevision = AssignmentRevision.TermsRole([role.Id]) }, default);
+        Assert.True((await eligibility.GetAsync(workers, default))[created.Id].IsReady);
+    }
+
+    [SqlFact]
+    public async Task ConcurrentTermsRoleSavesRejectOneStaleWriter()
+    {
+        await using var database = Database();
+        var staffData = new StaffDataService(database);
+        var firstRole = await staffData.CreateStaffRoleAsync(new() { Name = "Terms concurrency " + Guid.NewGuid().ToString("N") }, default);
+        var secondRole = await staffData.CreateStaffRoleAsync(new() { Name = "Terms concurrency " + Guid.NewGuid().ToString("N") }, default);
+        var terms = new TermsDocument { Title = "Concurrent terms " + Guid.NewGuid() };
+        database.TermsDocuments.Add(terms);
+        await database.SaveChangesAsync();
+        async Task<int> SaveAsync(int roleId)
+        {
+            await using var attempt = Database();
+            try
+            {
+                await new TermsService(attempt).SaveRoleAsync(1, terms.Id,
+                    new() { StaffRoleIds = [roleId], ExpectedRevision = AssignmentRevision.TermsRole([]) }, default);
+                return roleId;
+            }
+            catch (ApiException exception) when (exception.StatusCode == 409) { return 0; }
+        }
+        var results = await Task.WhenAll(SaveAsync(firstRole.Id), SaveAsync(secondRole.Id));
+        var winner = Assert.Single(results, result => result != 0);
+        Assert.Single(results, result => result == 0);
+        Assert.Equal(winner, (await database.StaffRoleTermsDocuments.AsNoTracking().SingleAsync(requirement => requirement.TermsDocumentId == terms.Id)).StaffRoleId);
+        Assert.Single(await database.AuditEntries.Where(entry => entry.Action == "Terms.Role" && entry.Subject.StartsWith($"Terms {terms.Id}:")).ToListAsync());
+    }
+
+    [SqlFact]
     public async Task CurrentAccountQueriesSessionOncePerHttpRequestAndRejectsDisabledAccountOnNextRequest()
     {
         await using var creator = Database();
@@ -312,11 +433,19 @@ public sealed class SqlWorkflowTests
         var name = "SQL document type " + Guid.NewGuid().ToString("N");
         var created = await service.CreateDocumentTypeAsync(new()
         {
-            Name = name, TextIdentifier = "INITIAL CERTIFICATE", StaffRoleIds = [1, 2, 1]
+            Name = name, TextIdentifier = "INITIAL CERTIFICATE", StaffRoleIds = [1, 2, 1],
+            StartDateLabel = " From ", ExpiryDateLabel = " To ", DocumentNumberLabel = " ID ",
+            ExtractedNameLabel = " Holder ", EmailLabel = " Personal email ", PhoneLabel = " Mobile "
         }, default);
         database.ChangeTracker.Clear();
         var stored = await service.GetDocumentTypeAsync(created.Id, default);
         Assert.Equal("INITIAL CERTIFICATE", stored.TextIdentifier);
+        Assert.Equal("From", stored.StartDateLabel);
+        Assert.Equal("To", stored.ExpiryDateLabel);
+        Assert.Equal("ID", stored.DocumentNumberLabel);
+        Assert.Equal("Holder", stored.ExtractedNameLabel);
+        Assert.Equal("Personal email", stored.EmailLabel);
+        Assert.Equal("Mobile", stored.PhoneLabel);
         Assert.Equal(new[] { 1, 2 }, stored.StaffRoleIds);
 
         var duplicate = await Assert.ThrowsAsync<ApiException>(() => service.CreateDocumentTypeAsync(new()
@@ -333,17 +462,33 @@ public sealed class SqlWorkflowTests
 
         await service.UpdateDocumentTypeAsync(created.Id, new()
         {
-            Name = name, TextIdentifier = "UPDATED CERTIFICATE", StaffRoleIds = [2, 3]
+            Name = name, TextIdentifier = "UPDATED CERTIFICATE", StaffRoleIds = [2, 3],
+            StartDateLabel = "Start", ExpiryDateLabel = "End", DocumentNumberLabel = "Registration ID",
+            ExtractedNameLabel = "Participant", EmailLabel = "Contact email", PhoneLabel = "Contact phone"
         }, default);
         database.ChangeTracker.Clear();
         stored = await service.GetDocumentTypeAsync(created.Id, default);
         Assert.Equal("UPDATED CERTIFICATE", stored.TextIdentifier);
+        Assert.Equal("Start", stored.StartDateLabel);
+        Assert.Equal("End", stored.ExpiryDateLabel);
+        Assert.Equal("Registration ID", stored.DocumentNumberLabel);
+        Assert.Equal("Participant", stored.ExtractedNameLabel);
+        Assert.Equal("Contact email", stored.EmailLabel);
+        Assert.Equal("Contact phone", stored.PhoneLabel);
         Assert.Equal(new[] { 2, 3 }, stored.StaffRoleIds);
         await service.UpdateDocumentTypeAsync(created.Id, new()
         {
             Name = name, TextIdentifier = "UPDATED CERTIFICATE", StaffRoleIds = []
         }, default);
-        Assert.Empty((await service.GetDocumentTypeAsync(created.Id, default)).StaffRoleIds);
+        database.ChangeTracker.Clear();
+        stored = await service.GetDocumentTypeAsync(created.Id, default);
+        Assert.Empty(stored.StaffRoleIds);
+        Assert.Null(stored.StartDateLabel);
+        Assert.Null(stored.ExpiryDateLabel);
+        Assert.Null(stored.DocumentNumberLabel);
+        Assert.Null(stored.ExtractedNameLabel);
+        Assert.Null(stored.EmailLabel);
+        Assert.Null(stored.PhoneLabel);
     }
 
     [SqlFact]

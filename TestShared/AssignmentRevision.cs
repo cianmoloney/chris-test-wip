@@ -5,6 +5,8 @@ namespace TestShared;
 
 public static class AssignmentRevision
 {
+    public static string TermsRole(IEnumerable<int> roleIds) => Documents(roleIds);
+
     public static string Documents(IEnumerable<int> values) =>
         Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(values.Distinct().Order())));
 

@@ -1,8 +1,8 @@
 @page
 @model TestFrontend.Pages.DocumentTypesModel
-@{ ViewData["Title"] = "Role Manager"; }
+@{ ViewData["Title"] = "Staff Roles & Document Types"; }
 
-<h1>Role Manager</h1>
+<h1>Staff Roles &amp; Document Types</h1>
 @if (Model.StatusMessage is not null)
 {
     <div class="alert alert-success" role="status" data-selection-message>@Model.StatusMessage</div>
@@ -88,6 +88,41 @@ else
             <input asp-for="Input.TextIdentifier" class="form-control" maxlength="256" required />
             <span asp-validation-for="Input.TextIdentifier" class="text-danger"></span>
         </div>
+        <fieldset class="col-12 border-top pt-3">
+            <legend class="h5">Scanned field mappings</legend>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label asp-for="Input.StartDateLabel" class="form-label">Start date label</label>
+                    <input asp-for="Input.StartDateLabel" class="form-control" maxlength="128" placeholder="Start Date" />
+                    <span asp-validation-for="Input.StartDateLabel" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="Input.ExpiryDateLabel" class="form-label">Expiry date label</label>
+                    <input asp-for="Input.ExpiryDateLabel" class="form-control" maxlength="128" placeholder="End Date" />
+                    <span asp-validation-for="Input.ExpiryDateLabel" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="Input.DocumentNumberLabel" class="form-label">Document number label</label>
+                    <input asp-for="Input.DocumentNumberLabel" class="form-control" maxlength="128" placeholder="Document Number / Certificate Number" />
+                    <span asp-validation-for="Input.DocumentNumberLabel" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="Input.ExtractedNameLabel" class="form-label">Extracted name label</label>
+                    <input asp-for="Input.ExtractedNameLabel" class="form-control" maxlength="128" placeholder="Name" />
+                    <span asp-validation-for="Input.ExtractedNameLabel" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="Input.EmailLabel" class="form-label">Email label</label>
+                    <input asp-for="Input.EmailLabel" class="form-control" maxlength="128" />
+                    <span asp-validation-for="Input.EmailLabel" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="Input.PhoneLabel" class="form-label">Phone label</label>
+                    <input asp-for="Input.PhoneLabel" class="form-control" maxlength="128" placeholder="Phone / Phone Number / Tel" />
+                    <span asp-validation-for="Input.PhoneLabel" class="text-danger"></span>
+                </div>
+            </div>
+        </fieldset>
         <div class="col-12 d-flex gap-2 flex-wrap">
             <button class="btn btn-primary" type="submit">@(Model.Id is null ? "Add document type" : "Save changes")</button>
             <a asp-page="/DocumentTypes" asp-route-roleId="@Model.RoleId" class="btn btn-outline-secondary">Cancel</a>

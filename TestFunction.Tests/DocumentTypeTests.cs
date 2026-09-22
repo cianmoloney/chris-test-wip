@@ -9,6 +9,71 @@ namespace TestFunction.Tests;
 public sealed class DocumentTypeTests
 {
     [Fact]
+    public async Task FieldLabelsRoundTripThroughCreateUpdateAndManagement()
+    {
+        await using var database = Database();
+        var service = new StaffDataService(database);
+        var request = new SaveDocumentTypeRequest { Name = "Training", TextIdentifier = "Training Certificate", StaffRoleIds = [1],
+            StartDateLabel = " From ", ExpiryDateLabel = " To ", DocumentNumberLabel = " ID ",
+            ExtractedNameLabel = " Holder ", EmailLabel = " Personal email ", PhoneLabel = " Mobile " };
+
+        var created = await service.CreateDocumentTypeAsync(request, default);
+
+        Assert.Equal("From", created.StartDateLabel);
+        Assert.Equal("To", created.ExpiryDateLabel);
+        Assert.Equal("ID", created.DocumentNumberLabel);
+        Assert.Equal("Holder", created.ExtractedNameLabel);
+        Assert.Equal("Personal email", created.EmailLabel);
+        Assert.Equal("Mobile", created.PhoneLabel);
+        database.ChangeTracker.Clear();
+        var loaded = (await service.GetDocumentTypeManagementAsync(default)).DocumentTypes.Single(type => type.Id == created.Id);
+        Assert.Equal(created with { StaffRoleIds = loaded.StaffRoleIds }, loaded);
+
+        await service.UpdateDocumentTypeAsync(created.Id, request with { StartDateLabel = "Start", ExpiryDateLabel = "End",
+            DocumentNumberLabel = "Certificate ID", ExtractedNameLabel = "Participant", EmailLabel = "Contact email", PhoneLabel = "Contact phone" }, default);
+        var updated = await service.GetDocumentTypeAsync(created.Id, default);
+        Assert.Equal("Start", updated.StartDateLabel);
+        Assert.Equal("End", updated.ExpiryDateLabel);
+        Assert.Equal("Certificate ID", updated.DocumentNumberLabel);
+        Assert.Equal("Participant", updated.ExtractedNameLabel);
+        Assert.Equal("Contact email", updated.EmailLabel);
+        Assert.Equal("Contact phone", updated.PhoneLabel);
+
+        await service.UpdateDocumentTypeAsync(created.Id, request with { StartDateLabel = " ", ExpiryDateLabel = "",
+            DocumentNumberLabel = null, ExtractedNameLabel = " ", EmailLabel = "", PhoneLabel = null }, default);
+        var cleared = await service.GetDocumentTypeAsync(created.Id, default);
+        Assert.Null(cleared.StartDateLabel);
+        Assert.Null(cleared.ExpiryDateLabel);
+        Assert.Null(cleared.DocumentNumberLabel);
+        Assert.Null(cleared.ExtractedNameLabel);
+        Assert.Null(cleared.EmailLabel);
+        Assert.Null(cleared.PhoneLabel);
+        Assert.Equal(new[] { 1 }, cleared.StaffRoleIds);
+    }
+
+    [Theory]
+    [InlineData(nameof(SaveDocumentTypeRequest.StartDateLabel))]
+    [InlineData(nameof(SaveDocumentTypeRequest.ExpiryDateLabel))]
+    [InlineData(nameof(SaveDocumentTypeRequest.DocumentNumberLabel))]
+    [InlineData(nameof(SaveDocumentTypeRequest.ExtractedNameLabel))]
+    [InlineData(nameof(SaveDocumentTypeRequest.EmailLabel))]
+    [InlineData(nameof(SaveDocumentTypeRequest.PhoneLabel))]
+    public async Task OverlongFieldLabelsAreRejectedBeforeMutation(string field)
+    {
+        await using var database = Database();
+        var service = new StaffDataService(database);
+        var request = new SaveDocumentTypeRequest { Name = "Training", TextIdentifier = "Training Certificate", StaffRoleIds = [1] };
+        var created = await service.CreateDocumentTypeAsync(request, default);
+        var invalid = request with { Name = "Changed", StaffRoleIds = [2] };
+        typeof(SaveDocumentTypeRequest).GetProperty(field)!.SetValue(invalid, new string('x', 129));
+
+        Assert.Equal(400, (await Assert.ThrowsAsync<ApiException>(() => service.UpdateDocumentTypeAsync(created.Id, invalid, default))).StatusCode);
+        Assert.Equal(400, (await Assert.ThrowsAsync<ApiException>(() => service.CreateDocumentTypeAsync(invalid, default))).StatusCode);
+        var unchanged = await service.GetDocumentTypeAsync(created.Id, default);
+        Assert.Equal(created with { StaffRoleIds = unchanged.StaffRoleIds }, unchanged);
+    }
+
+    [Fact]
     public async Task NewStaffRoleAppearsInManagementAndRegistrationLookups()
     {
         await using var database = Database();

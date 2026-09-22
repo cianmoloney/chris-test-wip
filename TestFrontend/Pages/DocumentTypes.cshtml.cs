@@ -32,7 +32,10 @@ public class DocumentTypesModel(FunctionApiClient api, ILogger<DocumentTypesMode
             Mode = "type";
             var type = Data.DocumentTypes.SingleOrDefault(type => type.Id == Id);
             if (type is null) return NotFound();
-            Input = new() { Name = type.Name, TextIdentifier = type.TextIdentifier ?? "", StaffRoleIds = type.StaffRoleIds };
+            Input = new() { Name = type.Name, TextIdentifier = type.TextIdentifier ?? "", StaffRoleIds = type.StaffRoleIds,
+                StartDateLabel = type.StartDateLabel, ExpiryDateLabel = type.ExpiryDateLabel,
+                DocumentNumberLabel = type.DocumentNumberLabel, ExtractedNameLabel = type.ExtractedNameLabel,
+                EmailLabel = type.EmailLabel, PhoneLabel = type.PhoneLabel };
         }
         if (Mode == "requirements")
             Requirements = new()

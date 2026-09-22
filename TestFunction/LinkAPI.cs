@@ -56,7 +56,20 @@ public sealed partial class API
     public Task<IActionResult> ListTerms([HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "terms")] HttpRequest request,
         CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>
             new OkObjectResult(await services.GetRequiredService<AppDbContext>().TermsDocuments.AsNoTracking().OrderBy(terms => terms.Title)
-                .Select(terms => new TermsDocumentResponse(terms.Id, terms.Title)).ToListAsync(cancellationToken)), cancellationToken);
+                .Select(terms => new TermsDocumentResponse(terms.Id, terms.Title)
+                { StaffRoleIds = terms.RequiredByRoles.OrderBy(requirement => requirement.StaffRoleId).Select(requirement => requirement.StaffRoleId).ToList() })
+                .ToListAsync(cancellationToken)), cancellationToken);
+
+    [Function(nameof(SaveTermsRole))]
+    public Task<IActionResult> SaveTermsRole(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "terms/{id:int}/staff-roles")] HttpRequest request,
+        int id, CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>
+        {
+            var actor = await Accounts.RequireAsync(request, Permissions.TermsWrite, cancellationToken);
+            await services.GetRequiredService<TermsService>().SaveRoleAsync(actor.Id, id,
+                await ReadAsync<SaveTermsRoleRequest>(request, cancellationToken), cancellationToken);
+            return new NoContentResult();
+        }, cancellationToken);
 
     [Function(nameof(GetTermsVersions))]
     public Task<IActionResult> GetTermsVersions(

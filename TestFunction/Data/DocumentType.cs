@@ -16,6 +16,24 @@ namespace TestFunction.Data
         [MaxLength(256)]
         public string? TextIdentifier { get; set; }
 
+        [MaxLength(128)]
+        public string? StartDateLabel { get; set; }
+
+        [MaxLength(128)]
+        public string? ExpiryDateLabel { get; set; }
+
+        [MaxLength(128)]
+        public string? DocumentNumberLabel { get; set; }
+
+        [MaxLength(128)]
+        public string? ExtractedNameLabel { get; set; }
+
+        [MaxLength(128)]
+        public string? EmailLabel { get; set; }
+
+        [MaxLength(128)]
+        public string? PhoneLabel { get; set; }
+
         public ICollection<DocumentEntry> Documents { get; set; } = new List<DocumentEntry>();
 
         public ICollection<StaffRoleDocumentType> RequiredByRoles { get; set; } = new List<StaffRoleDocumentType>();

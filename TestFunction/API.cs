@@ -138,7 +138,7 @@ public sealed partial class API(IApiAuthorization authorization, IServiceProvide
                     nameof(SetDocumentStatus) => Permissions.DocumentsValidate,
                     nameof(GetUsers) or nameof(CreateUser) or nameof(UpdateUser) => Permissions.UsersWrite,
                     nameof(CreateLink) or nameof(RevokeLink) => Permissions.LinksWrite,
-                    nameof(PublishTerms) or nameof(GetTermsVersions) => Permissions.TermsWrite,
+                    nameof(PublishTerms) or nameof(GetTermsVersions) or nameof(SaveTermsRole) => Permissions.TermsWrite,
                     nameof(ArchiveStaff) => Permissions.StaffWrite,
                     nameof(ArchiveDocument) => Permissions.DocumentsWrite,
                     _ => Permissions.StaffRead

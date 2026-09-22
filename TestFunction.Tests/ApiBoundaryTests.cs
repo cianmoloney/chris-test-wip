@@ -381,11 +381,76 @@ public sealed class ApiBoundaryTests
 
         var versions = Assert.IsType<List<TermsVersionResponse>>(Assert.IsType<OkObjectResult>(result).Value);
         Assert.Equal(new[] { 23, 24, 22, 21 }, versions.Select(version => version.Id));
-        Assert.All(versions, version => Assert.Equal(new TermsDocumentResponse(20, "Site terms"), version.TermsDocument));
+        Assert.All(versions, version =>
+        {
+            Assert.Equal(20, version.TermsDocument.Id);
+            Assert.Equal("Site terms", version.TermsDocument.Title);
+            Assert.Empty(version.TermsDocument.StaffRoleIds);
+        });
         Assert.Equal("Original accepted text", versions.Last().Content);
         Assert.False(versions.Last().IsActive);
         Assert.Equal("Current English\nLine two <not markup>", versions.First().Content);
         Assert.Empty(await database.AuditEntries.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("Admin", 204)]
+    [InlineData("HR", 204)]
+    [InlineData("Foreman", 403)]
+    public async Task TermsRoleAssignmentRequiresTermsWrite(string role, int expectedStatus)
+    {
+        await using var database = Database();
+        var user = await database.Users.SingleAsync(user => user.Id == 10001);
+        user.Role = await database.Roles.SingleAsync(candidate => candidate.Name == role);
+        database.TermsDocuments.Add(new() { Id = 20, Title = "Safety" });
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+        var request = Request();
+        request.Method = "PUT";
+        request.Body = new MemoryStream(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new SaveTermsRoleRequest
+        { StaffRoleIds = [1, 2], ExpectedRevision = AssignmentRevision.TermsRole([]) }));
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance).SaveTermsRole(request, 20, default);
+
+        Assert.Equal(expectedStatus, result is NoContentResult ? 204 : Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(expectedStatus == 204 ? new[] { 1, 2 } : [],
+            await database.StaffRoleTermsDocuments.OrderBy(requirement => requirement.StaffRoleId).Select(requirement => requirement.StaffRoleId).ToArrayAsync());
+    }
+
+    [Theory]
+    [InlineData("{}", 400)]
+    [InlineData("{\"staffRoleIds\":[1]}", 400)]
+    [InlineData("{\"staffRoleIds\":null,\"expectedRevision\":\"bad\"}", 400)]
+    public async Task MalformedTermsRoleRequestCannotClearAssignment(string body, int status)
+    {
+        await using var database = Database();
+        database.TermsDocuments.Add(new() { Id = 20, Title = "Safety", RequiredByRoles = [new() { StaffRoleId = 1 }] });
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+        var request = Request();
+        request.Method = "PUT";
+        request.Body = new MemoryStream(Encoding.UTF8.GetBytes(body));
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance).SaveTermsRole(request, 20, default);
+
+        Assert.Equal(status, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(1, (await database.StaffRoleTermsDocuments.AsNoTracking().SingleAsync()).StaffRoleId);
+    }
+
+    [Fact]
+    public async Task OlderEditionCannotBeAcceptedEvenWhenStillMarkedActive()
+    {
+        await using var database = Database();
+        database.Staff.Add(new() { Id = 7, FirstName = "Test", LastName = "Worker", Email = "terms@example.test", StaffRoleId = 1 });
+        database.TermsDocumentVersions.Add(new() { Id = 20, TermsDocument = new() { Id = 20, Title = "Safety", RequiredByRoles = [new() { StaffRoleId = 1 }] }, Version = 1, IsActive = true });
+        database.TermsDocumentVersions.Add(new() { Id = 21, TermsDocumentId = 20, Version = 2, IsActive = true });
+        database.StaffTermsAssignments.Add(new() { StaffId = 7, TermsDocumentId = 20, Version = 1 });
+        await database.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<ApiException>(() => new StaffDataService(database).AcceptTermsAsync(7, new(20, true), default));
+
+        Assert.Equal(409, error.StatusCode);
+        Assert.Empty(await database.StaffTermsAcceptances.ToListAsync());
     }
 
     [Theory]

@@ -23,6 +23,8 @@ namespace TestFunction.Data
 
         public DbSet<TermsDocument> TermsDocuments => Set<TermsDocument>();
 
+        public DbSet<StaffRoleTermsDocument> StaffRoleTermsDocuments => Set<StaffRoleTermsDocument>();
+
         public DbSet<TermsDocumentVersion> TermsDocumentVersions => Set<TermsDocumentVersion>();
 
         public DbSet<StaffTermsAcceptance> StaffTermsAcceptances => Set<StaffTermsAcceptance>();
@@ -146,6 +148,16 @@ namespace TestFunction.Data
             modelBuilder.Entity<TermsDocument>(entity =>
             {
                 entity.ToTable("TermsDocuments");
+            });
+
+            modelBuilder.Entity<StaffRoleTermsDocument>(entity =>
+            {
+                entity.ToTable("StaffRoleTermsDocuments");
+                entity.HasKey(requirement => new { requirement.StaffRoleId, requirement.TermsDocumentId });
+                entity.HasOne(requirement => requirement.StaffRole).WithMany(role => role.RequiredTerms)
+                    .HasForeignKey(requirement => requirement.StaffRoleId).OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(requirement => requirement.TermsDocument).WithMany(terms => terms.RequiredByRoles)
+                    .HasForeignKey(requirement => requirement.TermsDocumentId).OnDelete(DeleteBehavior.Cascade);
             });
 
             // Terms text is versioned per language (1 document : many versions).

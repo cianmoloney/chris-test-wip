@@ -157,6 +157,7 @@ the explicit local-only bypass above is enabled.
 | PUT | `/roles/{id}/responsibilities` | Admin-only replacement of a role's enabled responsibilities |
 | GET / POST | `/terms` | List documents / publish a translated edition |
 | GET | `/terms/{id}/versions` | Terms management history including previous versions and all languages; requires Terms.Write |
+| PUT | `/terms/{id}/staff-roles` | Replace the roles requiring this shared document; requires Terms.Write, explicit StaffRoleIds and ExpectedRevision |
 | POST | `/links` | Issue a purpose-scoped link and allocate terms |
 | DELETE | `/links/{id}` | Revoke an issued link |
 | POST | `/public/resolve`, `/public/register`, `/public/accept` | Capability-authorized worker operations |
@@ -190,7 +191,7 @@ still require integration verification against the configured services.
 
 ### Browser Interaction Checks
 
-Role Manager, office roles, users, and loaded terms versions switch locally.
+Staff Roles & Document Types, Access Editor, Accounts, and loaded terms versions switch locally.
 Staff/document filters, other terms documents, and file folders use normal
 server navigation, preserving fresh data, server search semantics and browser
 Back/Forward behavior. Registration Add/Remove updates the form locally.
@@ -222,7 +223,13 @@ node TestFunction.Tests/PageInteractions.browser.cjs
 
 Set `FRONTEND_TEST_CONFIGURATION` to test a different build configuration or
 `PLAYWRIGHT_CHANNEL` to use another installed Playwright browser channel.
-The check covers request counts, warnings before draft loss, role-specific
+Set `BROWSER_TEST_SUITE=navigation` to run only the header checks.
+Set `BROWSER_TEST_SUITE=quick-actions` for the header, homepage and signed-in
+upload checks, including selected types, validation, errors and permission denial.
+Set `BROWSER_TEST_SUITE=role-terms` to also check role-required terms assignment,
+clearing, moving, stale-save handling and permissions on desktop/mobile.
+The check covers navigation order, permission visibility, account access,
+responsive header layouts, request counts, warnings before draft loss, role-specific
 save targets, stale revisions, native folder/filter history, failed terms
 navigation, selected uploads, user edits, translated registration,
 no-JavaScript fallbacks, mobile widths and revoked sessions. Live Azure Storage
@@ -231,26 +238,59 @@ to a published disposable database named `HrImplementationVerification_*`.
 
 ## Workflow Rules
 
+- The header shows Uploaded Files, Staff, Document Explorer, Generate Link,
+  Terms, Accounts, then Admin-only Access Editor, subject to existing permissions.
+  The app name links home; the person icon beside Sign out opens My account.
+  Staff Roles & Document Types is available from Staff with `Documents.Write`.
+  Header labels and page titles change without changing routes or permissions.
+	The icons are locally hosted from `lucide-static` 0.468.0, with their
+  upstream license in `TestFrontend/wwwroot/lib/lucide/LICENSE`.
+- Home displays **Quick Actions**: Staff Links, Document Explorer, Staff Viewer,
+	and Upload File, subject to permissions. Document Explorer opens `/Documents`,
+	not the raw Uploaded Files browser. **Upload File** (`/UploadFile`) is also
+	linked from Document Explorer and requires `Staff.Read`, `Documents.Write`
+	and `Links.Write` on both GET and POST. It offers document-type selection or
+	automatic detection and accepts the same PDF/image formats up to 20 MB as
+	the public upload. It issues an unbound one-hour upload capability internally
+	and uses the existing upload API; the token is never included in the page.
+	Successful uploads await normal checks, extraction and manual review.
+	This homepage/upload change requires frontend deployment only.
 - HR/Admin can create, edit and archive staff/documents, reassign documents,
 	manage non-Admin accounts, publish translated terms and issue secure links.
-- HR/Admin can use **Role Manager** (formerly Document Types, retaining the
+- HR/Admin can use **Staff Roles & Document Types** (retaining the
 	`/DocumentTypes` route) to select a staff job role, check its required document
 	types, and save. Saving replaces only that role's requirements; an empty
 	selection clears them. **Add staff role** persists a new job role and selects
 	it in the dropdown. **Add document type** creates a new unchecked option,
-	including its literal `TextIdentifier`. Editing a document type's name or
-	identifier preserves its existing role assignments. Role selections persist in
+	including its literal `TextIdentifier`. Editing a document type's name,
+	identifier or field mappings preserves its existing role assignments. Role selections persist in
 	`StaffRoleDocumentTypes` and immediately affect readiness and required-document
 	lists, including registration lookups. This manages staff job roles, not the
-	Admin-only office **Roles & Responsibilities** page. New role-manager operations
-	reuse the existing schema; deploy both the Function and frontend.
+	Admin-only office **Access Editor** page. New role-manager operations
+	reuse the staff-role association tables; deploy both the Function and frontend.
 	Processing matches identifiers case-insensitively with normalized
 	whitespace. Missing or ambiguous matches are flagged for human review;
 	matching text never automatically validates a document. Existing types with
 	no identifier retain legacy name matching until HR configures them. Changes
 	apply to subsequent processing, not already-processed documents.
+	The document-type editor also provides six optional source labels, stored as
+	nullable `NVARCHAR(128)` columns on `DocumentTypes`: `StartDateLabel`,
+	`ExpiryDateLabel`, `DocumentNumberLabel`, `ExtractedNameLabel`, `EmailLabel`
+	and `PhoneLabel`. For example, map `From` to StartDate and `To` to ExpiryDate,
+	or `Start` and `End`; map `Registration ID`, `Participant`, `Personal email`
+	and `Mobile` to the remaining fields. Enter the printed label, not the value
+	or a regular expression. Labels match literally, ignoring case and whitespace.
+	PDF line boundaries are preserved; labels and values can be on adjacent lines.
+	The worker identifies the type first, then applies its labels. An explicit
+	mapping never falls back to unrelated text when its value is absent or invalid.
+	Blank mappings keep the existing defaults: `Start Date`, `End Date`,
+	`Document Number` / `Certificate Number`, `Name`, the first email address,
+	and `Phone` / `Phone Number` / `Tel` (then phone-shaped text).
+	Dates retain invariant-culture parsing; ISO `yyyy-MM-dd` avoids numeric date
+	ambiguity. Extracted dates are stored in UTC. Mappings affect future processing
+	only and never bypass manual validation or type-mismatch review.
 	Publish the database first to add nullable `DocumentTypes.TextIdentifier`
-	(`NVARCHAR(256)`), then deploy the Function and frontend. No data backfill is
+	(`NVARCHAR(256)`) and the six label columns, then deploy the Function and frontend. No data backfill is
 	required. Subsequent database publishes preserve HR-managed types and role
 	requirements; defaults are seeded only into an empty document-type catalog.
 - Foreman can view staff/documents, validate documents and issue all four link
@@ -258,7 +298,7 @@ to a published disposable database named `HrImplementationVerification_*`.
 - Users have one application role with configurable role responsibilities.
 	Admin uses email as their username. Disabling an account or changing its
 	credentials revokes sessions. HR cannot grant or modify Admin accounts.
-- Admin can use **Roles & Responsibilities** to enable or disable the supported
+- Admin can use **Access Editor** to enable or disable the supported
 	permissions for existing roles. Changes are audited and apply to signed-in
 	users on their next request. Disabled permissions remain stored with
 	`IsEnabled = 0`, so publishing reference data does not silently re-enable them.
@@ -285,7 +325,7 @@ to a published disposable database named `HrImplementationVerification_*`.
 	uploads consume the link. Previously issued stateless links no longer work.
 - Terms links bind a worker and edition. Published text is immutable, with
 	English/Polish/Ukrainian versions. One language acceptance satisfies an edition.
-	**Manage Terms** opens in read-only browsing mode: choose a terms document,
+	**Terms** opens in read-only browsing mode: choose a terms document,
 	then a version/language to view its exact published text. **Add a new version**
 	opens a separate draft prefilled from the latest translations; publishing
 	creates a new version rather than editing history. **Add terms document**
@@ -293,8 +333,34 @@ to a published disposable database named `HrImplementationVerification_*`.
 	Publishing updates existing assignments and requires fresh acceptance; issue
 	new terms links. Acceptance records the version actually displayed, in UTC.
 	A bearer link is not independent identity proof or a qualified e-signature.
+- **Terms** provides **Required for staff roles** checkboxes for each terms document.
+	Roles and terms documents are many-to-many through `StaffRoleTermsDocuments`.
+	A role can require several terms documents, and one document can be required
+	by several roles without duplicating its text, versions or acceptance history.
+	The composite primary key prevents duplicate role/document mappings. Unchecking
+	all roles removes only the role mappings, not individual assignments or history.
+	Saving roles does not publish a new edition. Saves require `Terms.Write`,
+	are audited, and reject stale `expectedRevision` values with HTTP 409.
+	The API requires an explicit `staffRoleIds` array; use `[]` to clear all roles.
+	Publish the database first, then deploy the Function and frontend together.
+	If the earlier single-role `TermsDocuments.StaffRoleId` column was deployed,
+	stop the old application and run
+	[TestDatabase/Scripts/MigrateStaffRoleTerms.sql](TestDatabase/Scripts/MigrateStaffRoleTerms.sql)
+	before publishing the updated SQL project. It transactionally copies the old
+	assignments into the junction table, then removes the obsolete column/FK/index.
+	It can be rerun safely and preserves document IDs, versions, individual
+	assignments and acceptance records. Do not bypass DACPAC data-loss protection
+	to drop the old column before this migration. The standalone setup includes
+	the junction table for new databases and must not be rerun on existing ones.
 - Readiness requires a current, human-validated document for each job
-	requirement and acceptance of every assigned terms edition. Dates are inclusive
+	requirement and acceptance of the latest published edition of every terms
+	document required by the staff member's current role or individually assigned
+	to them. A required document with no published version blocks readiness.
+	Role requirements apply immediately, including to existing staff and new
+	registrations before any terms link is issued. Acceptance in any language of
+	that same edition qualifies; acceptance of an older edition does not. Publishing
+	a new edition immediately removes readiness until it is accepted. Use Staff
+	Links to issue a terms link for each outstanding document. Dates are inclusive
 	UTC calendar dates; missing expiry means no expiry. Metadata or association
 	edits require renewed document validation.
 - Removal archives staff/documents or disables office accounts, preserving
@@ -308,7 +374,7 @@ to a published disposable database named `HrImplementationVerification_*`.
 For a new database without a DACPAC, open
 [TestDatabase/Scripts/SetupDatabase.sql](TestDatabase/Scripts/SetupDatabase.sql)
 in SSMS or Azure Data Studio, select your empty application database, and execute
-the entire script. It creates all 17 tables, the staff-number sequence, indexes,
+the entire script. It creates all application tables, the staff-number sequence, indexes,
 constraints and reference data in one transaction. SQLCMD mode is not required.
 
 The database must already exist. This is initial setup, not an upgrade script:

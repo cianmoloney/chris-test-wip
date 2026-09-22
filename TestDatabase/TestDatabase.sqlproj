@@ -80,11 +80,13 @@
     <Build Include="dbo\Tables\ShareLinks.sql" />
     <Build Include="dbo\Tables\EmailDispatches.sql" />
     <Build Include="dbo\Tables\StaffTermsAssignments.sql" />
+    <Build Include="dbo\Tables\StaffRoleTermsDocuments.sql" />
   </ItemGroup>
   <ItemGroup>
     <PostDeploy Include="Scripts\PostDeployment.sql" />
     <None Include="Scripts\SetupDatabase.sql" />
     <None Include="Scripts\SeedUsers.sql" />
+    <None Include="Scripts\MigrateStaffRoleTerms.sql" />
   </ItemGroup>
   <ItemGroup>
     <SqlCmdVariable Include="LegacyUploadsContainer">

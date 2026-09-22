@@ -16,6 +16,8 @@ namespace TestFunction.Data
 
         public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+        public ICollection<StaffRoleTermsDocument> RequiredByRoles { get; set; } = new List<StaffRoleTermsDocument>();
+
         public ICollection<TermsDocumentVersion> Versions { get; set; } = new List<TermsDocumentVersion>();
     }
 }

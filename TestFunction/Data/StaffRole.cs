@@ -16,5 +16,7 @@ namespace TestFunction.Data
         public ICollection<Staff> StaffMembers { get; set; } = new List<Staff>();
 
         public ICollection<StaffRoleDocumentType> RequiredDocumentTypes { get; set; } = new List<StaffRoleDocumentType>();
+
+        public ICollection<StaffRoleTermsDocument> RequiredTerms { get; set; } = new List<StaffRoleTermsDocument>();
     }
 }

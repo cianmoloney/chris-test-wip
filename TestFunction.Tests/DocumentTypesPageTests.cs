@@ -171,6 +171,12 @@ public sealed class DocumentTypesPageTests
 
         Assert.Equal("Induction", page.Input.Name);
         Assert.Equal("INDUCTED", page.Input.TextIdentifier);
+        Assert.Equal("From", page.Input.StartDateLabel);
+        Assert.Equal("To", page.Input.ExpiryDateLabel);
+        Assert.Equal("ID", page.Input.DocumentNumberLabel);
+        Assert.Equal("Holder", page.Input.ExtractedNameLabel);
+        Assert.Equal("Personal email", page.Input.EmailLabel);
+        Assert.Equal("Mobile", page.Input.PhoneLabel);
         Assert.Equal(new[] { 1 }, page.Input.StaffRoleIds);
         page.Id = 999;
         Assert.IsType<NotFoundResult>(await page.OnGetAsync(default));
@@ -187,13 +193,21 @@ public sealed class DocumentTypesPageTests
         page.Mode = "type";
         page.RoleId = 2;
         page.Id = id;
-        page.Input = new() { Name = "Safety", TextIdentifier = "SAFEPASS", StaffRoleIds = [1, 2] };
+        page.Input = new() { Name = "Safety", TextIdentifier = "SAFEPASS", StaffRoleIds = [1, 2],
+            StartDateLabel = "Start", ExpiryDateLabel = "End", DocumentNumberLabel = "Reference",
+            ExtractedNameLabel = "Participant", EmailLabel = "Contact email", PhoneLabel = "Contact phone" };
 
         var result = Assert.IsType<RedirectToPageResult>(await page.OnPostAsync(default));
 
         Assert.Equal(method, handler.Method?.Method);
         Assert.Equal(path, handler.Path);
         Assert.Equal("SAFEPASS", handler.Saved!.TextIdentifier);
+        Assert.Equal("Start", handler.Saved.StartDateLabel);
+        Assert.Equal("End", handler.Saved.ExpiryDateLabel);
+        Assert.Equal("Reference", handler.Saved.DocumentNumberLabel);
+        Assert.Equal("Participant", handler.Saved.ExtractedNameLabel);
+        Assert.Equal("Contact email", handler.Saved.EmailLabel);
+        Assert.Equal("Contact phone", handler.Saved.PhoneLabel);
         Assert.Equal(id is null ? Array.Empty<int>() : new[] { 1 }, handler.Saved.StaffRoleIds);
         Assert.Null(result.RouteValues!["Id"]);
         Assert.Equal(2, result.RouteValues["RoleId"]);
@@ -208,12 +222,16 @@ public sealed class DocumentTypesPageTests
         using var client = Client(handler);
         var page = Page(client);
         page.Mode = "type";
-        page.Input = new() { Name = "Duplicate", TextIdentifier = "TEXT", StaffRoleIds = [2] };
+        page.Input = new() { Name = "Duplicate", TextIdentifier = "TEXT", StaffRoleIds = [2],
+            StartDateLabel = "From", ExpiryDateLabel = "To", DocumentNumberLabel = "ID",
+            ExtractedNameLabel = "Holder", EmailLabel = "Personal email", PhoneLabel = "Mobile" };
+        var draft = page.Input;
 
         Assert.IsType<PageResult>(await page.OnPostAsync(default));
 
         Assert.Equal("Duplicate", page.Input.Name);
         Assert.Equal("TEXT", page.Input.TextIdentifier);
+        Assert.Equal(draft with { StaffRoleIds = page.Input.StaffRoleIds }, page.Input);
         Assert.Contains("Input.Name", page.ModelState.Keys);
         Assert.Single(page.Data.DocumentTypes);
     }
@@ -262,7 +280,8 @@ public sealed class DocumentTypesPageTests
             if (request.Method == HttpMethod.Get)
                 return new(HttpStatusCode.OK)
                 {
-                    Content = JsonContent.Create(EmptyCatalog ? new DocumentTypeManagementResponse([], []) : new DocumentTypeManagementResponse([new(4, "Induction", "INDUCTED", [1])],
+                    Content = JsonContent.Create(EmptyCatalog ? new DocumentTypeManagementResponse([], []) : new DocumentTypeManagementResponse([new(4, "Induction", "INDUCTED", [1])
+                        { StartDateLabel = "From", ExpiryDateLabel = "To", DocumentNumberLabel = "ID", ExtractedNameLabel = "Holder", EmailLabel = "Personal email", PhoneLabel = "Mobile" }],
                         [new(1, "Driver"), new(2, "Carpenter")]), options: ApiJson.Options)
                 };
             Method = request.Method;

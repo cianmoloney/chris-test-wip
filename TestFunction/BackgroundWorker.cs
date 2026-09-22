@@ -12,6 +12,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using TestFunction.Data;
@@ -164,12 +165,17 @@ public class BackgroundWorker(AppDbContext database, BlobServiceClient storage, 
             var text = isPdf
                 ? ExtractTextFromPdf(memoryStream)
                 : await ExtractTextFromImageAsync(memoryStream);
-            var info = ExtractDocumentInfo(text);
-            if (isPdf && (string.IsNullOrWhiteSpace(text) || info == new DocumentInfo(null, null, null, null, null)))
+            var types = await database.DocumentTypes.AsNoTracking().ToListAsync(cancellationToken);
+            var typeMatch = DocumentTypeMatcher.Match(text, ExtractField(text, "Document Type"), document.DocumentTypeId, types);
+            var matchedType = types.FirstOrDefault(type => type.Id == typeMatch.TypeId);
+            var info = ExtractDocumentInfo(text, matchedType);
+            if (isPdf && (string.IsNullOrWhiteSpace(text) || (typeMatch.Issue is not null && info == new DocumentInfo(null, null, null, null, null))))
             {
                 memoryStream.Position = 0;
                 text = await ExtractTextFromPdfViaOcrAsync(memoryStream);
-                info = ExtractDocumentInfo(text);
+                typeMatch = DocumentTypeMatcher.Match(text, ExtractField(text, "Document Type"), document.DocumentTypeId, types);
+                matchedType = types.FirstOrDefault(type => type.Id == typeMatch.TypeId);
+                info = ExtractDocumentInfo(text, matchedType);
             }
             document.ExtractedName = Limit(info.Name, 256);
             document.Email = Limit(info.Email, 256);
@@ -178,8 +184,6 @@ public class BackgroundWorker(AppDbContext database, BlobServiceClient storage, 
             document.DocumentType = Limit(info.DocumentType, 128);
             document.StartDate = info.StartDate is null ? null : new DateTimeOffset(DateTime.SpecifyKind(info.StartDate.Value, DateTimeKind.Utc));
             document.ExpiryDate = info.EndDate is null ? null : new DateTimeOffset(DateTime.SpecifyKind(info.EndDate.Value, DateTimeKind.Utc));
-            var types = await database.DocumentTypes.AsNoTracking().ToListAsync(cancellationToken);
-            var typeMatch = DocumentTypeMatcher.Match(text, info.DocumentType, document.DocumentTypeId, types);
             document.DocumentTypeId = typeMatch.TypeId;
             if (document.StaffId is null)
             {
@@ -266,7 +270,7 @@ public class BackgroundWorker(AppDbContext database, BlobServiceClient storage, 
             foreach (var page in document.GetPages())
             {
                 if (page.Width > 1440 || page.Height > 1440) throw new InvalidDataException("PDF page dimensions exceed the processing limit.");
-                textBuilder.AppendLine(page.Text);
+                textBuilder.AppendLine(ContentOrderTextExtractor.GetText(page));
             }
         }
 
@@ -320,16 +324,18 @@ public class BackgroundWorker(AppDbContext database, BlobServiceClient storage, 
         return textBuilder.ToString();
     }
 
-    private static DocumentInfo ExtractDocumentInfo(string text)
+    private static DocumentInfo ExtractDocumentInfo(string text, DocumentType? type = null)
     {
         return new DocumentInfo(
-            Name: ExtractField(text, "Name"),
-            StartDate: ExtractDateField(text, "Start Date"),
-            EndDate: ExtractDateField(text, "End Date"),
+            Name: ExtractField(text, string.IsNullOrWhiteSpace(type?.ExtractedNameLabel) ? "Name" : type.ExtractedNameLabel),
+            StartDate: ExtractDateField(text, string.IsNullOrWhiteSpace(type?.StartDateLabel) ? "Start Date" : type.StartDateLabel),
+            EndDate: ExtractDateField(text, string.IsNullOrWhiteSpace(type?.ExpiryDateLabel) ? "End Date" : type.ExpiryDateLabel),
             DocumentType: ExtractField(text, "Document Type"),
-            DocumentNumber: ExtractField(text, "Document Number") ?? ExtractField(text, "Certificate Number"),
-            Email: ExtractEmail(text),
-            Phone: ExtractPhone(text));
+            DocumentNumber: string.IsNullOrWhiteSpace(type?.DocumentNumberLabel)
+                ? ExtractField(text, "Document Number") ?? ExtractField(text, "Certificate Number")
+                : ExtractField(text, type.DocumentNumberLabel),
+            Email: ExtractEmail(string.IsNullOrWhiteSpace(type?.EmailLabel) ? text : ExtractField(text, type.EmailLabel) ?? ""),
+            Phone: ExtractPhone(text, type?.PhoneLabel));
     }
 
     private static string? ExtractEmail(string text)
@@ -338,11 +344,12 @@ public class BackgroundWorker(AppDbContext database, BlobServiceClient storage, 
         return match.Success ? match.Value : null;
     }
 
-    private static string? ExtractPhone(string text)
+    private static string? ExtractPhone(string text, string? label = null)
     {
         // Prefer a labelled phone field; fall back to the first phone-shaped token.
-        var value = ExtractField(text, "Phone") ?? ExtractField(text, "Phone Number") ?? ExtractField(text, "Tel");
-        var candidate = value ?? text;
+        var candidate = string.IsNullOrWhiteSpace(label)
+            ? ExtractField(text, "Phone") ?? ExtractField(text, "Phone Number") ?? ExtractField(text, "Tel") ?? text
+            : ExtractField(text, label) ?? "";
         var match = Regex.Match(candidate, @"\+?\d[\d\s\-\(\)]{7,}\d");
         return match.Success ? NormalizePhone(match.Value) : null;
     }
@@ -354,27 +361,23 @@ public class BackgroundWorker(AppDbContext database, BlobServiceClient storage, 
     // Matches labelled fields such as "Name: John Smith" in the extracted PDF text.
     private static string? ExtractField(string text, string label)
     {
+        var labelPattern = string.Join(@"\s+", label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(Regex.Escape));
         var match = Regex.Match(
             text,
-            $@"{Regex.Escape(label)}\s*[:\-]\s*(.+?)(?=(?:\r?\n)|(?:\s{{2,}})|$)",
-            RegexOptions.IgnoreCase);
+            $@"(?<![\p{{L}}\p{{N}}_]){labelPattern}(?![\p{{L}}\p{{N}}_])(?:\s*[:\-]\s*|[ \t]*\r?\n[ \t]*)(.+?)(?=(?:\r?\n)|(?:\s{{2,}})|$)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
         return match.Success ? match.Groups[1].Value.Trim() : null;
     }
 
     private static DateTime? ExtractDateField(string text, string label)
     {
-        var value = ExtractField(text, label);
-        if (value is null)
-        {
-            return null;
-        }
+        var labelPattern = string.Join(@"\s+", label.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(Regex.Escape));
+        var match = Regex.Match(text,
+            $@"(?<![\p{{L}}\p{{N}}_]){labelPattern}(?![\p{{L}}\p{{N}}_])\s*[:\-]?\s*(?<date>\d{{1,4}}[/\-\.]\d{{1,2}}[/\-\.]\d{{1,4}}|\d{{1,2}}\s+\p{{L}}+\s+\d{{4}}|\p{{L}}+\s+\d{{1,2}},?\s+\d{{4}})(?!\d)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
-        // Take only the leading date portion in case other text follows on the same line.
-        var dateMatch = Regex.Match(value, @"\d{1,4}[/\-\.]\d{1,2}[/\-\.]\d{1,4}|\d{1,2}\s+\w+\s+\d{4}|\w+\s+\d{1,2},?\s+\d{4}");
-        var candidate = dateMatch.Success ? dateMatch.Value : value;
-
-        return DateTime.TryParse(candidate, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+        return match.Success && DateTime.TryParse(match.Groups["date"].Value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
             ? parsed
             : null;
     }

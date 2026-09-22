@@ -18,6 +18,16 @@ public sealed class EligibilityService(AppDbContext database, TimeProvider clock
         var requirements = await database.StaffRoleDocumentTypes.AsNoTracking().Include(requirement => requirement.DocumentType).ToListAsync(cancellationToken);
         var assignments = await database.StaffTermsAssignments.AsNoTracking().Include(assignment => assignment.TermsDocument)
             .Where(assignment => ids.Contains(assignment.StaffId)).ToListAsync(cancellationToken);
+        var roleIds = staff.Where(worker => worker.StaffRoleId != null).Select(worker => worker.StaffRoleId!.Value).Distinct().ToList();
+        var assignedTermsIds = assignments.Select(assignment => assignment.TermsDocumentId).Distinct().ToList();
+        var roleTerms = await database.StaffRoleTermsDocuments.AsNoTracking()
+            .Where(requirement => roleIds.Contains(requirement.StaffRoleId)).ToListAsync(cancellationToken);
+        var roleTermsIds = roleTerms.Select(requirement => requirement.TermsDocumentId).Distinct().ToList();
+        var terms = await database.TermsDocuments.AsNoTracking()
+            .Where(document => roleTermsIds.Contains(document.Id) || assignedTermsIds.Contains(document.Id))
+            .Select(document => new { document.Id, document.Title,
+                LatestVersion = document.Versions.Max(version => (int?)version.Version) })
+            .ToListAsync(cancellationToken);
         var acceptances = await database.StaffTermsAcceptances.AsNoTracking().Include(acceptance => acceptance.TermsDocumentVersion)
             .Where(acceptance => ids.Contains(acceptance.StaffId)).ToListAsync(cancellationToken);
         return staff.ToDictionary(worker => worker.Id, worker =>
@@ -27,10 +37,20 @@ public sealed class EligibilityService(AppDbContext database, TimeProvider clock
             foreach (var requirement in requirements.Where(requirement => requirement.StaffRoleId == worker.StaffRoleId))
                 if (!documents.Any(document => document.StaffId == worker.Id && document.DocumentTypeId == requirement.DocumentTypeId && IsCurrent(document, clock.GetUtcNow())))
                     reasons.Add($"Current validated document required: {requirement.DocumentType.Name}.");
-            foreach (var assignment in assignments.Where(assignment => assignment.StaffId == worker.Id))
+            var workerAssignments = assignments.Where(assignment => assignment.StaffId == worker.Id).ToDictionary(assignment => assignment.TermsDocumentId);
+            foreach (var document in terms.Where(document => roleTerms.Any(requirement => requirement.StaffRoleId == worker.StaffRoleId && requirement.TermsDocumentId == document.Id)
+                || workerAssignments.ContainsKey(document.Id)))
+            {
+                if (document.LatestVersion is null)
+                {
+                    reasons.Add($"Required terms have no published version: {document.Title}.");
+                    continue;
+                }
+                var requiredVersion = Math.Max(document.LatestVersion.Value, workerAssignments.GetValueOrDefault(document.Id)?.Version ?? 0);
                 if (!acceptances.Any(acceptance => acceptance.StaffId == worker.Id
-                    && acceptance.TermsDocumentVersion.TermsDocumentId == assignment.TermsDocumentId && acceptance.TermsDocumentVersion.Version == assignment.Version))
-                    reasons.Add($"Terms outstanding: {assignment.TermsDocument.Title}, version {assignment.Version}.");
+                    && acceptance.TermsDocumentVersion.TermsDocumentId == document.Id && acceptance.TermsDocumentVersion.Version == requiredVersion))
+                    reasons.Add($"Terms outstanding: {document.Title}, version {requiredVersion}.");
+            }
             return new ReadinessResponse(reasons.Count == 0, reasons);
         });
     }

@@ -11,37 +11,22 @@
 </head>
 <body>
     <header>
-        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
+        <nav class="navbar navbar-expand-xl navbar-light bg-white border-bottom box-shadow mb-3" aria-label="Main navigation">
             <div class="container">
                 <a class="navbar-brand" asp-area="" asp-page="/Index">TestFrontend</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
+                @if (User.Identity?.IsAuthenticated == true)
+                {
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavigation" aria-controls="mainNavigation"
                         aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1 flex-wrap">
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-page="/Index">Home</a>
-                        </li>
-                        @if (User.Identity?.IsAuthenticated == true)
-                        {
+                <div id="mainNavigation" class="navbar-collapse collapse justify-content-between">
+                    <ul class="navbar-nav flex-grow-1">
                             @if (User.HasClaim("permission", TestShared.Permissions.StaffRead))
                             {
                             <li class="nav-item">
                                 <a class="nav-link text-dark" asp-area="" asp-page="/Files">Uploaded Files</a>
                             </li>
-                            }
-                            <li class="nav-item"><a class="nav-link text-dark" asp-page="/Account">Account</a></li>
-                            @if (User.IsInRole("Admin"))
-                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Roles">Roles &amp; Responsibilities</a></li> }
-                            @if (User.HasClaim("permission", TestShared.Permissions.UsersWrite))
-                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Users">Users</a></li> }
-                            @if (User.HasClaim("permission", TestShared.Permissions.TermsWrite))
-                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/ManageTerms">Manage Terms</a></li> }
-                            @if (User.HasClaim("permission", TestShared.Permissions.DocumentsWrite))
-                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/DocumentTypes">Role Manager</a></li> }
-                            @if (User.HasClaim("permission", TestShared.Permissions.StaffRead))
-                            {
                             <li class="nav-item">
                                 <a class="nav-link text-dark" asp-area="" asp-page="/Staff">Staff</a>
                             </li>
@@ -55,15 +40,23 @@
                                 <a class="nav-link text-dark" asp-area="" asp-page="/GenerateLink">Generate Link</a>
                             </li>
                             }
-                        }
+                            @if (User.HasClaim("permission", TestShared.Permissions.TermsWrite))
+                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/ManageTerms">Terms</a></li> }
+                            @if (User.HasClaim("permission", TestShared.Permissions.UsersWrite))
+                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Users">Accounts</a></li> }
+                            @if (User.IsInRole("Admin"))
+                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Roles">Access Editor</a></li> }
                     </ul>
-                    @if (User.Identity?.IsAuthenticated == true)
-                    {
-                        <form method="post" asp-page="/Login" asp-page-handler="Logout" class="d-flex">
+                    <div class="d-flex align-items-center gap-1 flex-shrink-0">
+                        <a class="nav-link text-dark account-link" asp-page="/Account" aria-label="My account" title="My account">
+                            <img src="~/lib/lucide/user-round.svg" width="24" height="24" alt="" aria-hidden="true" />
+                        </a>
+                        <form method="post" asp-page="/Login" asp-page-handler="Logout" class="d-flex m-0">
                             <button type="submit" class="btn btn-link nav-link text-dark">Sign out</button>
                         </form>
-                    }
+                    </div>
                 </div>
+                }
             </div>
         </nav>
     </header>
