@@ -120,6 +120,13 @@ else
                             case DocumentStatus.ParseFailed:
                                 <span class="badge bg-secondary">Parse failed</span>
                                 break;
+                            case DocumentStatus.Unsafe:
+                                <span class="badge bg-danger">Quarantined</span>
+                                break;
+                            case DocumentStatus.AwaitingScan:
+                            case DocumentStatus.AwaitingProcessing:
+                                <span class="badge bg-warning text-dark">Awaiting processing</span>
+                                break;
                             default:
                                 <span class="badge bg-warning text-dark">Pending review</span>
                                 break;
@@ -127,7 +134,7 @@ else
                     </td>
                     <td>@document.Timestamp.ToLocalTime().ToString("g")</td>
                     <td>
-                        @if (document.ScanPassed && !string.IsNullOrWhiteSpace(document.Name))
+                        @if (document.Status != DocumentStatus.Unsafe && !string.IsNullOrWhiteSpace(document.BlobName ?? document.Name))
                         {
                             <a class="btn btn-sm btn-outline-primary"
                                asp-page="/StaffMember" asp-page-handler="Download"

@@ -3,6 +3,14 @@
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
   <data name="Registration" xml:space="preserve"><value>Staff registration</value></data>
+  <data name="MultipleRegistration" xml:space="preserve"><value>Multiple staff registration</value></data>
+  <data name="StaffEntry" xml:space="preserve"><value>Staff member {0}</value></data>
+  <data name="AddAnother" xml:space="preserve"><value>Add another...</value></data>
+  <data name="RemoveStaff" xml:space="preserve"><value>Remove staff member {0}</value></data>
+  <data name="RegisterAll" xml:space="preserve"><value>Register all</value></data>
+  <data name="MultipleRegistered" xml:space="preserve"><value>Staff registered: {0}.</value></data>
+  <data name="BatchLimit" xml:space="preserve"><value>Register between 1 and 25 staff members.</value></data>
+  <data name="BatchNotRegistered" xml:space="preserve"><value>No staff were registered. Check the highlighted details and try again.</value></data>
   <data name="InvalidLink" xml:space="preserve"><value>This link is invalid, expired or already used. Please request a new link.</value></data>
   <data name="FirstName" xml:space="preserve"><value>First name</value></data>
   <data name="LastName" xml:space="preserve"><value>Last name</value></data>

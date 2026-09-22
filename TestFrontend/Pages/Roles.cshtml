@@ -1,0 +1,64 @@
+@page
+@model TestFrontend.Pages.RolesModel
+@using TestShared
+@{ ViewData["Title"] = "Roles & Responsibilities"; }
+
+<h1>Roles &amp; Responsibilities</h1>
+@if (Model.StatusMessage is not null)
+{
+    <div class="alert alert-success" role="status">@Model.StatusMessage</div>
+}
+@if (Model.Data.Roles.Count == 0)
+{
+    <p class="text-muted">No roles found.</p>
+}
+else
+{
+    <form method="get" class="d-flex gap-2 flex-wrap align-items-end mb-4">
+        <div>
+            <label for="role-choice" class="form-label">Role</label>
+            <select id="role-choice" name="Id" class="form-select">
+                @foreach (var role in Model.Data.Roles)
+                {
+                    <option value="@role.Id" selected="@(Model.Id == role.Id)">@role.Name</option>
+                }
+            </select>
+        </div>
+        <button type="submit" class="btn btn-outline-primary">Open role</button>
+    </form>
+
+    <form method="post" class="border-top pt-3">
+        <input type="hidden" asp-for="Id" />
+        <div asp-validation-summary="All" class="text-danger" role="alert"></div>
+        <fieldset>
+            <legend class="h4">@Model.Data.Roles.Single(role => role.Id == Model.Id).Name responsibilities</legend>
+            <div class="row g-3 mb-4">
+                @foreach (var responsibility in Model.Data.Responsibilities)
+                {
+                    var label = responsibility switch
+                    {
+                        Permissions.StaffRead => "View staff and documents",
+                        Permissions.StaffWrite => "Add, edit and archive staff",
+                        Permissions.DocumentsWrite => "Edit documents, assignments and staff role requirements",
+                        Permissions.DocumentsValidate => "Validate and reject documents",
+                        Permissions.LinksWrite => "Generate and revoke secure links",
+                        Permissions.UsersWrite => "Manage user accounts",
+                        Permissions.TermsWrite => "Publish terms editions",
+                        _ => responsibility
+                    };
+                    <div class="col-md-6">
+                        <div class="form-check">
+                            <input type="checkbox" id="permission-@responsibility" name="Input.Responsibilities" value="@responsibility"
+                                   checked="@(Model.Input.Responsibilities.Contains(responsibility))" class="form-check-input" />
+                            <label for="permission-@responsibility" class="form-check-label">@label <span class="d-block small text-muted">@responsibility</span></label>
+                        </div>
+                    </div>
+                }
+            </div>
+        </fieldset>
+        <div class="d-flex gap-2 flex-wrap">
+            <button type="submit" class="btn btn-primary">Save responsibilities</button>
+            <a asp-page="/Roles" asp-route-id="@Model.Id" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+    </form>
+}

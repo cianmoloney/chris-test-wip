@@ -1,0 +1,99 @@
+@page
+@model TestFrontend.Pages.DocumentTypesModel
+@{ ViewData["Title"] = "Role Manager"; }
+
+<h1>Role Manager</h1>
+@if (Model.StatusMessage is not null)
+{
+    <div class="alert alert-success" role="status">@Model.StatusMessage</div>
+}
+
+@if (Model.Mode == "requirements")
+{
+    <div class="d-flex gap-3 flex-wrap align-items-end mb-4">
+        @if (Model.Data.StaffRoles.Count > 0)
+        {
+            <form method="get">
+                <label asp-for="RoleId" class="form-label">Staff role</label>
+                <select asp-for="RoleId" class="form-select" onchange="this.form.requestSubmit()">
+                    @foreach (var role in Model.Data.StaffRoles)
+                    { <option value="@role.Id">@role.Name</option> }
+                </select>
+                <noscript><button type="submit" class="btn btn-outline-primary mt-2">Open role</button></noscript>
+            </form>
+        }
+        <a asp-page="/DocumentTypes" asp-route-mode="role" asp-route-roleId="@Model.RoleId" class="btn btn-outline-primary">Add staff role</a>
+        <a asp-page="/DocumentTypes" asp-route-mode="type" asp-route-roleId="@Model.RoleId" class="btn btn-outline-secondary">Add document type</a>
+    </div>
+    @if (Model.SelectedRole is { } selected)
+    {
+        <form method="post" asp-route-mode="requirements" asp-route-roleId="@selected.Id" class="border-top pt-3">
+            <div asp-validation-summary="All" class="text-danger" role="alert"></div>
+            <fieldset>
+                <legend class="h4 text-break">Required documents: @selected.Name</legend>
+                @foreach (var type in Model.Data.DocumentTypes)
+                {
+                    <div class="d-flex gap-3 justify-content-between align-items-start border-bottom py-3">
+                        <div class="form-check text-break">
+                            <input type="checkbox" id="type-@type.Id" name="Requirements.DocumentTypeIds" value="@type.Id"
+                                   checked="@(Model.Requirements.DocumentTypeIds.Contains(type.Id))" class="form-check-input" />
+                            <label for="type-@type.Id" class="form-check-label">@type.Name</label>
+                            <div class="small text-muted">Text identifier: @(string.IsNullOrWhiteSpace(type.TextIdentifier) ? "Not configured" : type.TextIdentifier)</div>
+                        </div>
+                        <a asp-page="/DocumentTypes" asp-route-mode="type" asp-route-id="@type.Id" asp-route-roleId="@selected.Id" aria-label="Edit @type.Name">Edit</a>
+                    </div>
+                }
+                @if (Model.Data.DocumentTypes.Count == 0)
+                {
+                    <p class="text-muted">No document types found.</p>
+                }
+            </fieldset>
+            <button type="submit" class="btn btn-primary mt-3">Save requirements</button>
+        </form>
+    }
+    else
+    {
+        <p class="text-muted">No staff roles found.</p>
+    }
+}
+else if (Model.Mode == "role")
+{
+    <h2 class="h4">Add staff role</h2>
+    <form method="post" asp-route-mode="role" asp-route-roleId="@Model.RoleId" class="row g-3">
+        <div asp-validation-summary="All" class="text-danger" role="alert"></div>
+        <div class="col-md-6">
+            <label asp-for="RoleInput.Name" class="form-label">Staff role name</label>
+            <input asp-for="RoleInput.Name" class="form-control" maxlength="128" required />
+            <span asp-validation-for="RoleInput.Name" class="text-danger"></span>
+        </div>
+        <div class="col-12 d-flex gap-2 flex-wrap">
+            <button type="submit" class="btn btn-primary">Add staff role</button>
+            <a asp-page="/DocumentTypes" asp-route-roleId="@Model.RoleId" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+    </form>
+}
+else
+{
+    <h2 class="h4">@(Model.Id is null ? "Add document type" : "Edit document type")</h2>
+    <form method="post" asp-route-mode="type" asp-route-roleId="@Model.RoleId" asp-route-id="@Model.Id" class="row g-3">
+        <div asp-validation-summary="All" class="text-danger" role="alert"></div>
+        <div class="col-md-6">
+            <label asp-for="Input.Name" class="form-label">Document type name</label>
+            <input asp-for="Input.Name" class="form-control" maxlength="128" required />
+            <span asp-validation-for="Input.Name" class="text-danger"></span>
+        </div>
+        <div class="col-md-6">
+            <label asp-for="Input.TextIdentifier" class="form-label">Text identifier</label>
+            <input asp-for="Input.TextIdentifier" class="form-control" maxlength="256" required />
+            <span asp-validation-for="Input.TextIdentifier" class="text-danger"></span>
+        </div>
+        <div class="col-12 d-flex gap-2 flex-wrap">
+            <button class="btn btn-primary" type="submit">@(Model.Id is null ? "Add document type" : "Save changes")</button>
+            <a asp-page="/DocumentTypes" asp-route-roleId="@Model.RoleId" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+    </form>
+}
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

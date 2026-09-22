@@ -55,6 +55,7 @@ builder.Services
     .AddCookie(options =>
     {
         options.LoginPath = "/Login";
+        options.AccessDeniedPath = "/AccessDenied";
         options.Cookie.HttpOnly = true;
         options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
         options.ExpireTimeSpan = TimeSpan.FromHours(1);

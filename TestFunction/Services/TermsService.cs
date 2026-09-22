@@ -7,6 +7,18 @@ namespace TestFunction.Services;
 
 public sealed class TermsService(AppDbContext database)
 {
+    public async Task<List<TermsVersionResponse>> GetVersionsAsync(int termsDocumentId, CancellationToken cancellationToken)
+    {
+        var terms = await database.TermsDocuments.AsNoTracking().SingleOrDefaultAsync(terms => terms.Id == termsDocumentId, cancellationToken)
+            ?? throw new ApiException(404, "Terms not found.");
+        var versions = await database.TermsDocumentVersions.AsNoTracking()
+            .Where(version => version.TermsDocumentId == termsDocumentId)
+            .OrderByDescending(version => version.Version).ThenBy(version => version.Language)
+            .ToListAsync(cancellationToken);
+        return versions.Select(version => new TermsVersionResponse(version.Id, new(terms.Id, terms.Title),
+            version.Content, version.Language, version.Version, version.IsActive, version.CreatedAt)).ToList();
+    }
+
     public Task<TermsDocumentResponse> PublishAsync(int actorId, PublishTermsRequest request, CancellationToken cancellationToken) =>
         database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {

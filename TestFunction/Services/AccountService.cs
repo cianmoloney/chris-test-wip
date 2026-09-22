@@ -93,6 +93,52 @@ public sealed class AccountService(AppDbContext database, IEmailService email, T
         return user;
     }
 
+    public async Task<UserResponse> RequireAdminAsync(HttpRequest request, CancellationToken cancellationToken)
+    {
+        var actor = await RequireAsync(request, null, cancellationToken);
+        if (actor.Role != "Admin") throw new ApiException(403, "Only Admin can manage role responsibilities.");
+        return actor;
+    }
+
+    public async Task<RolesResponse> ListRolesAsync(UserResponse actor, CancellationToken cancellationToken)
+    {
+        if (actor.Role != "Admin") throw new ApiException(403, "Only Admin can manage role responsibilities.");
+        var roles = await database.Roles.AsNoTracking().Include(role => role.Responsibilities)
+            .OrderBy(role => role.Name).ToListAsync(cancellationToken);
+        return new(roles.Select(role => new RoleResponsibilitiesResponse(role.Id, role.Name,
+            role.Responsibilities.Where(responsibility => responsibility.IsEnabled && Permissions.All.Contains(responsibility.Name))
+                .Select(responsibility => responsibility.Name).Order().ToList())).ToList(), Permissions.All.ToList());
+    }
+
+    public async Task SaveRoleResponsibilitiesAsync(UserResponse actor, int roleId, SaveRoleResponsibilitiesRequest request, CancellationToken cancellationToken)
+    {
+        if (actor.Role != "Admin") throw new ApiException(403, "Only Admin can manage role responsibilities.");
+        if (request.Responsibilities is null || request.Responsibilities.Count > Permissions.All.Length
+            || request.Responsibilities.Any(permission => !Permissions.All.Contains(permission)))
+            throw new ApiException(400, "Select only supported responsibilities.", "Responsibilities");
+        var enabled = request.Responsibilities.ToHashSet(StringComparer.Ordinal);
+        if (!enabled.Contains(Permissions.StaffRead) && enabled.Overlaps(
+            [Permissions.StaffWrite, Permissions.DocumentsWrite, Permissions.DocumentsValidate, Permissions.LinksWrite, Permissions.TermsWrite]))
+            throw new ApiException(400, "Staff.Read is required for staff editing, document editing or validation, links, and terms.", "Responsibilities");
+        var role = await database.Roles.Include(role => role.Responsibilities)
+            .SingleOrDefaultAsync(role => role.Id == roleId, cancellationToken) ?? throw new ApiException(404, "Role not found.");
+        var previous = role.Responsibilities.Where(responsibility => responsibility.IsEnabled && Permissions.All.Contains(responsibility.Name))
+            .Select(responsibility => responsibility.Name).Order().ToList();
+        foreach (var permission in Permissions.All)
+        {
+            var responsibility = role.Responsibilities.SingleOrDefault(responsibility => responsibility.Name == permission);
+            if (responsibility is null)
+                role.Responsibilities.Add(new Responsibility { Name = permission, IsEnabled = enabled.Contains(permission) });
+            else
+                responsibility.IsEnabled = enabled.Contains(permission);
+        }
+        database.AuditEntries.Add(new()
+        {
+            UserId = actor.Id, Action = "Role.Responsibilities", Subject = $"Role {role.Id}: [{string.Join(",", previous)}] -> [{string.Join(",", enabled.Order())}]"
+        });
+        await database.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task LogoutAsync(HttpRequest request, CancellationToken cancellationToken)
     {
         var hash = HashToken(request.Headers["X-User-Session"].ToString());

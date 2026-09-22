@@ -70,8 +70,8 @@ public sealed class UploadService(AppDbContext database, LinkService links, Uplo
             database.Documents.Add(new DocumentEntry
             {
                 ContainerName = link.ContainerName, BlobName = link.BlobName, Name = Path.GetFileName(file.FileName),
-                StaffId = link.StaffId, DocumentTypeId = link.DocumentTypeId, Status = DocumentStatus.AwaitingScan,
-                Issue = "Awaiting file safety scan and extraction."
+                StaffId = link.StaffId, DocumentTypeId = link.DocumentTypeId, Status = DocumentStatus.AwaitingProcessing,
+                Issue = "Awaiting file checks and extraction."
             });
         await database.SaveChangesAsync(cancellationToken);
         return new(link.ContainerName!, link.BlobName);

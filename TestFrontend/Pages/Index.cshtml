@@ -8,14 +8,20 @@
     <h1 class="display-4">Welcome</h1>
 
     <div class="list-group mt-4">
+        @if (User.HasClaim("permission", TestShared.Permissions.LinksWrite))
+        {
         <a asp-page="/GenerateLink" class="list-group-item list-group-item-action">
             Generate secure link for Staff
         </a>
+        }
+        @if (User.HasClaim("permission", TestShared.Permissions.StaffRead))
+        {
         <a asp-page="/Files" class="list-group-item list-group-item-action">
-            File Explorer
+            Uploaded Files
         </a>
         <a asp-page="/Staff" class="list-group-item list-group-item-action">
             Staff Viewer
         </a>
+        }
     </div>
 </div>

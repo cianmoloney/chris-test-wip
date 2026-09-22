@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace TestShared;
 
@@ -38,3 +39,13 @@ public sealed record SaveUserRequest
 public sealed record UsersResponse(List<UserResponse> Users, List<LookupResponse> Roles);
 /// <summary>The authenticated user's optional email MFA preference.</summary>
 public sealed record MfaPreferenceRequest(bool Enabled);
+
+/// <summary>A role and its enabled application responsibilities.</summary>
+public sealed record RoleResponsibilitiesResponse(int Id, string Name, List<string> Responsibilities);
+/// <summary>The role configuration and the supported responsibility names.</summary>
+public sealed record RolesResponse(List<RoleResponsibilitiesResponse> Roles, List<string> Responsibilities);
+/// <summary>The complete enabled responsibility selection for one existing role.</summary>
+public sealed record SaveRoleResponsibilitiesRequest
+{
+    [JsonRequired, Required, MaxLength(7)] public List<string> Responsibilities { get; init; } = [];
+}

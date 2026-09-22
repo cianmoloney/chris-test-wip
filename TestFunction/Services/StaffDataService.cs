@@ -8,6 +8,13 @@ public interface IStaffDataService
 {
     Task<StaffListResponse> GetStaffAsync(string? filter, string? sortBy, CancellationToken cancellationToken);
     Task<LookupsResponse> GetLookupsAsync(CancellationToken cancellationToken);
+    Task<DocumentTypeManagementResponse> GetDocumentTypeManagementAsync(CancellationToken cancellationToken);
+    Task<DocumentTypeResponse> GetDocumentTypeAsync(int id, CancellationToken cancellationToken);
+    Task<DocumentTypeResponse> CreateDocumentTypeAsync(SaveDocumentTypeRequest request, CancellationToken cancellationToken);
+    Task UpdateDocumentTypeAsync(int id, SaveDocumentTypeRequest request, CancellationToken cancellationToken);
+    Task<LookupResponse> GetStaffRoleAsync(int id, CancellationToken cancellationToken);
+    Task<LookupResponse> CreateStaffRoleAsync(CreateStaffRoleRequest request, CancellationToken cancellationToken);
+    Task SaveStaffRoleDocumentsAsync(int id, SaveStaffRoleDocumentsRequest request, CancellationToken cancellationToken);
     Task<StaffResponse> CreateStaffAsync(CreateStaffRequest request, CancellationToken cancellationToken);
     Task<StaffMemberResponse> GetStaffMemberAsync(int id, CancellationToken cancellationToken);
     Task UpdateStaffAsync(int id, UpdateStaffRequest request, CancellationToken cancellationToken);
@@ -68,6 +75,99 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
         return new(types, roles, documentTypes, requirements.GroupBy(requirement => requirement.StaffRoleId)
             .ToDictionary(group => group.Key, group => group.Select(requirement => requirement.Name).ToList()));
     }
+
+    public async Task<DocumentTypeManagementResponse> GetDocumentTypeManagementAsync(CancellationToken cancellationToken)
+    {
+        var types = await database.DocumentTypes.AsNoTracking().Include(type => type.RequiredByRoles)
+            .OrderBy(type => type.Name).ToListAsync(cancellationToken);
+        return new(types.Select(MapDocumentType).ToList(), await GetRolesAsync(cancellationToken));
+    }
+
+    public async Task<LookupResponse> GetStaffRoleAsync(int id, CancellationToken cancellationToken) =>
+        await database.StaffRoles.AsNoTracking().Where(role => role.Id == id)
+            .Select(role => new LookupResponse(role.Id, role.Name, null)).SingleOrDefaultAsync(cancellationToken) ?? throw NotFound();
+
+    public async Task<LookupResponse> CreateStaffRoleAsync(CreateStaffRoleRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 128)
+            throw new ApiException(400, "Enter a staff role name of up to 128 characters.", "Name");
+        var name = request.Name.Trim();
+        var normalized = name.ToUpperInvariant();
+        if (await database.StaffRoles.AnyAsync(role => role.Name.ToUpper() == normalized, cancellationToken))
+            throw new ApiException(409, "A staff role with this name already exists.", "Name");
+        var role = new StaffRole { Name = name };
+        database.StaffRoles.Add(role);
+        await database.SaveChangesAsync(cancellationToken);
+        return new(role.Id, role.Name);
+    }
+
+    public async Task SaveStaffRoleDocumentsAsync(int id, SaveStaffRoleDocumentsRequest request, CancellationToken cancellationToken)
+    {
+        var role = await database.StaffRoles.Include(role => role.RequiredDocumentTypes)
+            .SingleOrDefaultAsync(role => role.Id == id, cancellationToken) ?? throw NotFound();
+        if (request.DocumentTypeIds is null || request.DocumentTypeIds.Count > 256)
+            throw new ApiException(400, "Select valid document types.", "DocumentTypeIds");
+        var typeIds = request.DocumentTypeIds.ToHashSet();
+        if (await database.DocumentTypes.CountAsync(type => typeIds.Contains(type.Id), cancellationToken) != typeIds.Count)
+            throw new ApiException(400, "Select valid document types.", "DocumentTypeIds");
+        database.StaffRoleDocumentTypes.RemoveRange(role.RequiredDocumentTypes.Where(requirement => !typeIds.Contains(requirement.DocumentTypeId)));
+        foreach (var typeId in typeIds.Where(typeId => !role.RequiredDocumentTypes.Any(requirement => requirement.DocumentTypeId == typeId)))
+            role.RequiredDocumentTypes.Add(new StaffRoleDocumentType { DocumentTypeId = typeId });
+        await database.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<DocumentTypeResponse> GetDocumentTypeAsync(int id, CancellationToken cancellationToken)
+    {
+        var type = await database.DocumentTypes.AsNoTracking().Include(type => type.RequiredByRoles)
+            .SingleOrDefaultAsync(type => type.Id == id, cancellationToken) ?? throw NotFound();
+        return MapDocumentType(type);
+    }
+
+    public async Task<DocumentTypeResponse> CreateDocumentTypeAsync(SaveDocumentTypeRequest request, CancellationToken cancellationToken)
+    {
+        var roleIds = await ValidateDocumentTypeRequestAsync(request, null, cancellationToken);
+        var type = new DocumentType
+        {
+            Name = request.Name.Trim(), TextIdentifier = request.TextIdentifier.Trim(),
+            RequiredByRoles = roleIds.Select(roleId => new StaffRoleDocumentType { StaffRoleId = roleId }).ToList()
+        };
+        database.DocumentTypes.Add(type);
+        await database.SaveChangesAsync(cancellationToken);
+        return MapDocumentType(type);
+    }
+
+    public async Task UpdateDocumentTypeAsync(int id, SaveDocumentTypeRequest request, CancellationToken cancellationToken)
+    {
+        var type = await database.DocumentTypes.Include(type => type.RequiredByRoles)
+            .SingleOrDefaultAsync(type => type.Id == id, cancellationToken) ?? throw NotFound();
+        var roleIds = await ValidateDocumentTypeRequestAsync(request, id, cancellationToken);
+        type.Name = request.Name.Trim();
+        type.TextIdentifier = request.TextIdentifier.Trim();
+        database.StaffRoleDocumentTypes.RemoveRange(type.RequiredByRoles.Where(role => !roleIds.Contains(role.StaffRoleId)));
+        foreach (var roleId in roleIds.Where(roleId => !type.RequiredByRoles.Any(role => role.StaffRoleId == roleId)))
+            type.RequiredByRoles.Add(new StaffRoleDocumentType { StaffRoleId = roleId });
+        await database.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<HashSet<int>> ValidateDocumentTypeRequestAsync(SaveDocumentTypeRequest request, int? id, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 128)
+            throw new ApiException(400, "Enter a document type name of up to 128 characters.", "Name");
+        if (string.IsNullOrWhiteSpace(request.TextIdentifier) || request.TextIdentifier.Length > 256)
+            throw new ApiException(400, "Enter identifying text of up to 256 characters.", "TextIdentifier");
+        if (request.StaffRoleIds is null || request.StaffRoleIds.Count > 256)
+            throw new ApiException(400, "Select valid staff roles.", "StaffRoleIds");
+        var name = request.Name.Trim().ToUpperInvariant();
+        if (await database.DocumentTypes.AnyAsync(type => type.Id != id && type.Name.ToUpper() == name, cancellationToken))
+            throw new ApiException(409, "A document type with this name already exists.", "Name");
+        var roleIds = request.StaffRoleIds.ToHashSet();
+        if (await database.StaffRoles.CountAsync(role => roleIds.Contains(role.Id), cancellationToken) != roleIds.Count)
+            throw new ApiException(400, "Select valid staff roles.", "StaffRoleIds");
+        return roleIds;
+    }
+
+    private static DocumentTypeResponse MapDocumentType(DocumentType type) =>
+        new(type.Id, type.Name, type.TextIdentifier, type.RequiredByRoles.Select(role => role.StaffRoleId).Order().ToList());
 
     public async Task<StaffResponse> CreateStaffAsync(CreateStaffRequest request, CancellationToken cancellationToken)
     {
@@ -153,7 +253,7 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
             "failed" => query.Where(document => document.Status == DocumentStatus.ParseFailed),
             "validated" => query.Where(document => document.Status == DocumentStatus.Validated),
             "rejected" => query.Where(document => document.Status == DocumentStatus.Rejected),
-            "scanning" => query.Where(document => document.Status == DocumentStatus.AwaitingScan),
+            "scanning" or "processing" => query.Where(document => document.Status == DocumentStatus.AwaitingScan || document.Status == DocumentStatus.AwaitingProcessing),
             "unsafe" => query.Where(document => document.Status == DocumentStatus.Unsafe),
             _ => query
         };
@@ -178,11 +278,12 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
         if (request.Status is not (DocumentStatus.Validated or DocumentStatus.Rejected))
             throw new ApiException(400, "Invalid document status.", "Status");
         var document = await database.Documents.FindAsync([id], cancellationToken) ?? throw NotFound();
-        if (request.Status == DocumentStatus.Validated && (!document.ScanPassed || document.ProcessingCompletedAt is null))
-            throw new ApiException(409, "File safety processing must complete before validation.");
+        if (document.Status == DocumentStatus.Unsafe)
+            throw new ApiException(409, "Quarantined files cannot be approved or reclassified. Upload a replacement file.");
+        if (request.Status == DocumentStatus.Validated && document.ProcessingCompletedAt is null)
+            throw new ApiException(409, "File checks and extraction must complete before validation.");
         document.Status = request.Status;
         document.IsValid = request.Status == DocumentStatus.Validated;
-        if (request.Status == DocumentStatus.Rejected) document.ProcessingCompletedAt ??= DateTimeOffset.UtcNow;
         await database.SaveChangesAsync(cancellationToken);
     }
 
@@ -237,7 +338,7 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
     {
         var document = await database.Documents.AsNoTracking()
             .FirstOrDefaultAsync(document => document.Id == documentId && document.StaffId == staffId, cancellationToken) ?? throw NotFound();
-        if (!document.ScanPassed) throw new ApiException(409, "The file is not available until safety checks pass.");
+        if (document.Status == DocumentStatus.Unsafe) throw new ApiException(409, "Download blocked: file quarantined.");
         return MapDocument(document);
     }
 
@@ -315,7 +416,8 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
     private static void ResetReview(DocumentEntry document)
     {
         document.IsValid = false;
-        if (document.ScanPassed) document.Status = DocumentStatus.PendingReview;
+        if (document.Status != DocumentStatus.Unsafe && document.ProcessingCompletedAt is not null)
+            document.Status = DocumentStatus.PendingReview;
     }
 
     private static StaffResponse MapStaff(Staff staff) => new(staff.Id, staff.StaffId, staff.StaffNumber,
@@ -327,7 +429,9 @@ public sealed class StaffDataService(AppDbContext database) : IStaffDataService
         document.BlobName, document.ExtractedName, document.Email, document.Phone, document.DocumentType, document.DocumentTypeId,
         document.Type is null ? null : new(document.Type.Id, document.Type.Name), document.DocumentNumber,
         document.StartDate, document.ExpiryDate, document.IsValid, document.Status, document.Timestamp, document.StaffId,
-        document.Staff is null ? null : MapStaff(document.Staff), document.ContainerName, document.ScanPassed, document.Issue);
+        document.Staff is null ? null : MapStaff(document.Staff), document.ContainerName, document.ScanPassed,
+        document.Status == DocumentStatus.AwaitingScan ? "Awaiting file checks and extraction." : document.Issue,
+        document.ProcessingCompletedAt);
 
     private static TermsVersionResponse MapTerms(TermsDocumentVersion version) => new(version.Id,
         new(version.TermsDocument.Id, version.TermsDocument.Title), version.Content, version.Language, version.Version,

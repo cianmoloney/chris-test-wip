@@ -12,6 +12,7 @@ namespace TestFrontend.Pages
     /// documents associated with them, including downloading files from
     /// blob storage.
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = Permissions.StaffRead)]
     public class StaffMemberModel : PageModel
     {
         private readonly FunctionApiClient _api;

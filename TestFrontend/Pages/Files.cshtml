@@ -1,10 +1,10 @@
 @page
 @model FilesModel
 @{
-    ViewData["Title"] = "File Explorer";
+    ViewData["Title"] = "Uploaded Files";
 }
 
-<h1>File Explorer</h1>
+<h1>Uploaded Files</h1>
 
 <nav aria-label="breadcrumb">
     <ol class="breadcrumb">
@@ -36,7 +36,7 @@
     <div class="alert alert-warning">@Model.StatusMessage</div>
 }
 
-@if (User.HasClaim("permission", TestShared.Permissions.DocumentsWrite))
+@if (User.HasClaim("permission", TestShared.Permissions.DocumentsWrite) && User.HasClaim("permission", TestShared.Permissions.LinksWrite))
 {
 <form method="post" enctype="multipart/form-data"
     asp-page="/Files" asp-page-handler="Upload" asp-route-prefix="@Model.Prefix">
@@ -74,7 +74,7 @@
                 <td>@file.LastModified?.ToString("g")</td>
                 <td>
                     <a class="btn btn-sm btn-outline-primary"
-                              asp-page="/Files" asp-page-handler="Download" asp-route-blobName="@file.BlobName">
+                              asp-page="/Files" asp-page-handler="Download" asp-route-blobName="@file.BlobName" asp-route-containerName="@Model.ContainerName" asp-route-prefix="@Model.Prefix">
                         Download
                     </a>
                 </td>

@@ -3,6 +3,14 @@
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
   <data name="Registration" xml:space="preserve"><value>Rejestracja pracownika</value></data>
+  <data name="MultipleRegistration" xml:space="preserve"><value>Rejestracja wielu pracowników</value></data>
+  <data name="StaffEntry" xml:space="preserve"><value>Pracownik {0}</value></data>
+  <data name="AddAnother" xml:space="preserve"><value>Dodaj kolejnego...</value></data>
+  <data name="RemoveStaff" xml:space="preserve"><value>Usuń pracownika {0}</value></data>
+  <data name="RegisterAll" xml:space="preserve"><value>Zarejestruj wszystkich</value></data>
+  <data name="MultipleRegistered" xml:space="preserve"><value>Zarejestrowani pracownicy: {0}.</value></data>
+  <data name="BatchLimit" xml:space="preserve"><value>Zarejestruj od 1 do 25 pracowników.</value></data>
+  <data name="BatchNotRegistered" xml:space="preserve"><value>Nie zarejestrowano żadnego pracownika. Sprawdź zaznaczone dane i spróbuj ponownie.</value></data>
   <data name="InvalidLink" xml:space="preserve"><value>Link jest nieprawidłowy, wygasł lub został już wykorzystany. Poproś o nowy link.</value></data>
   <data name="FirstName" xml:space="preserve"><value>Imię</value></data>
   <data name="LastName" xml:space="preserve"><value>Nazwisko</value></data>

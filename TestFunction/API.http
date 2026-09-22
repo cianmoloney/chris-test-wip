@@ -6,6 +6,11 @@
 @session = REPLACE_WITH_USER_SESSION
 @linkToken = REPLACE_WITH_ISSUED_LINK
 
+### Authorize an uploaded-file download (Staff.Read; archived/quarantined files blocked)
+GET {{baseUrl}}/files/access?container=uploads&blob=2026%2F09%2Fcertificate.pdf
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
 ### Sign in; use the returned token as session only when requiresMfa is false
 POST {{baseUrl}}/accounts/login
 Authorization: Bearer {{token}}
@@ -24,6 +29,19 @@ Content-Type: application/json
 GET {{baseUrl}}/lookups
 Authorization: Bearer {{token}}
 X-User-Session: {{session}}
+
+### Roles and supported responsibilities (Admin only)
+GET {{baseUrl}}/roles
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Replace a role's enabled responsibilities (Admin only; 204)
+PUT {{baseUrl}}/roles/3/responsibilities
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "responsibilities": ["Staff.Read", "Documents.Validate", "Links.Write"] }
 
 ### Filter and sort staff
 GET {{baseUrl}}/staff?filter=Smith&sortBy=registered
@@ -63,6 +81,53 @@ Content-Type: application/json
   "phoneNumber": "+35312345678",
   "staffRoleId": 1
 }
+
+### Create a staff job role (Documents.Write; separate from office account roles)
+POST {{baseUrl}}/staff-roles
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "name": "Brick Layer" }
+
+### Read a staff role (use the ID returned by creation)
+GET {{baseUrl}}/staff-roles/1
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Save the complete required-document selection for one staff role (204)
+PUT {{baseUrl}}/staff-roles/1/document-types
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "documentTypeIds": [1, 2] }
+
+### Role Manager catalog: all document types, staff roles and requirements
+GET {{baseUrl}}/document-types
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Create a document type with its text identifier and required roles (201)
+POST {{baseUrl}}/document-types
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "name": "Site induction", "textIdentifier": "INDUCTION COMPLETE", "staffRoleIds": [1, 2] }
+
+### Read a document type (use its returned ID)
+GET {{baseUrl}}/document-types/1
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
+### Update a document type and replace its required-role selection (204)
+PUT {{baseUrl}}/document-types/1
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "name": "Safe Pass", "textIdentifier": "Safepass", "staffRoleIds": [1, 2, 3] }
 
 ### Documents awaiting review
 GET {{baseUrl}}/documents?status=pending
@@ -128,6 +193,11 @@ Content-Type: application/json
   "expiryDate": "2027-01-01T00:00:00Z"
 }
 
+### Browse all versions and languages of a terms document (requires Terms.Write)
+GET {{baseUrl}}/terms/1/versions
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+
 ### Current terms in Polish (falls back to English)
 GET {{baseUrl}}/staff/{{staffId}}/terms?language=pl
 Authorization: Bearer {{token}}
@@ -163,6 +233,27 @@ X-User-Session: {{session}}
 Content-Type: application/json
 
 { "purpose": "upload", "staffId": null, "termsDocumentId": null, "validHours": 24 }
+
+### Issue an unassigned one-use multiple registration link
+POST {{baseUrl}}/links
+Authorization: Bearer {{token}}
+X-User-Session: {{session}}
+Content-Type: application/json
+
+{ "purpose": "register-many", "staffId": null, "validHours": 24 }
+
+### Register a complete batch atomically; use the token from the multiple registration link
+POST {{baseUrl}}/public/register-many
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "token": "{{linkToken}}",
+  "staff": [
+    { "firstName": "Alex", "lastName": "Smith", "email": "alex.smith@example.test", "staffTypeId": 1, "staffRoleId": 1 },
+    { "firstName": "Sam", "lastName": "Jones", "email": "sam.jones@example.test", "staffTypeId": 1, "staffRoleId": 1 }
+  ]
+}
 
 ### Resolve a worker upload link without an office session
 POST {{baseUrl}}/public/resolve

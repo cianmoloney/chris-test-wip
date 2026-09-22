@@ -22,7 +22,10 @@
         <option value="registered">Sort by registration date</option>
     </select>
     <button type="submit" class="btn btn-primary">Apply</button>
+    @if (User.HasClaim("permission", TestShared.Permissions.LinksWrite))
+    {
     <a asp-page="/GenerateLink" class="btn btn-outline-secondary">Generate secure link</a>
+    }
 </form>
 
 @if (Model.StaffList.Count == 0)
@@ -67,9 +70,12 @@ else
                     </td>
                     <td>@staff.RegisteredAt.ToLocalTime().ToString("g")</td>
                     <td>
-                        <a asp-page="/StaffMember" asp-route-id="@staff.Id" class="btn btn-sm btn-outline-primary">Edit</a>
+                        <a asp-page="/StaffMember" asp-route-id="@staff.Id" class="btn btn-sm btn-outline-primary">@(User.HasClaim("permission", TestShared.Permissions.StaffWrite) ? "Edit" : "View")</a>
+                        @if (User.HasClaim("permission", TestShared.Permissions.LinksWrite))
+                        {
                         <a asp-page="/GenerateLink" asp-route-staffId="@staff.Id" asp-route-linkType="upload" class="btn btn-sm btn-outline-secondary">Upload link</a>
                         <a asp-page="/GenerateLink" asp-route-staffId="@staff.Id" asp-route-linkType="terms" class="btn btn-sm btn-outline-secondary">Terms link</a>
+                        }
                     </td>
                 </tr>
             }

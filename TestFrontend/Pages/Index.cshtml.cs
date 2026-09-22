@@ -30,6 +30,7 @@ namespace TestFrontend.Pages
 
         public async Task<IActionResult> OnPostAsync(CancellationToken cancellationToken)
         {
+            if (!User.HasClaim("permission", TestShared.Permissions.DocumentsWrite)) return Forbid();
             if (Upload is null || Upload.Length == 0)
             {
                 StatusMessage = "Please select a file to upload.";

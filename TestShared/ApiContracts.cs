@@ -7,6 +7,32 @@ namespace TestShared;
 /// <summary>A named staff type, role, or document type.</summary>
 public sealed record LookupResponse(int Id, string Name, string? Prefix = null);
 
+/// <summary>A document type and the staff roles that require it.</summary>
+public sealed record DocumentTypeResponse(int Id, string Name, string? TextIdentifier, List<int> StaffRoleIds);
+
+/// <summary>Document types and available staff roles for HR management.</summary>
+public sealed record DocumentTypeManagementResponse(List<DocumentTypeResponse> DocumentTypes, List<LookupResponse> StaffRoles);
+
+/// <summary>A new staff job role, separate from office-user access roles.</summary>
+public sealed record CreateStaffRoleRequest
+{
+    [Required, MaxLength(128)] public string Name { get; init; } = "";
+}
+
+/// <summary>The complete document-type requirements for a single staff role.</summary>
+public sealed record SaveStaffRoleDocumentsRequest
+{
+    [JsonRequired, Required, MaxLength(256)] public List<int> DocumentTypeIds { get; init; } = [];
+}
+
+/// <summary>Editable document identification text and required-role associations.</summary>
+public sealed record SaveDocumentTypeRequest
+{
+    [Required, MaxLength(128)] public string Name { get; init; } = "";
+    [Required, MaxLength(256)] public string TextIdentifier { get; init; } = "";
+    [Required, MaxLength(256)] public List<int> StaffRoleIds { get; init; } = [];
+}
+
 /// <summary>Staff details exposed to the website without persistence navigation properties.</summary>
 public sealed record StaffResponse(
     int Id, string? StaffId, int StaffNumber, string FirstName, string LastName,
@@ -29,6 +55,7 @@ public enum DocumentStatus
     ParseFailed = 3,
     AwaitingScan = 4,
     Unsafe = 5,
+    AwaitingProcessing = 6,
 }
 
 public static class ApiJson
@@ -82,7 +109,13 @@ public sealed record DocumentResponse(int Id, string Name, string? BlobName, str
     string? Email, string? Phone, string? DocumentType, int? DocumentTypeId, LookupResponse? Type,
     string? DocumentNumber, DateTimeOffset? StartDate, DateTimeOffset? ExpiryDate, bool IsValid,
     DocumentStatus Status, DateTimeOffset Timestamp, int? StaffId, StaffResponse? Staff,
-    string? ContainerName = null, bool ScanPassed = false, string? Issue = null);
+    string? ContainerName = null, bool ScanPassed = false, string? Issue = null,
+    DateTimeOffset? ProcessingCompletedAt = null)
+{
+    public string StatusDisplay => Status is DocumentStatus.AwaitingScan or DocumentStatus.AwaitingProcessing
+        ? "Awaiting processing" : Status.ToString();
+    public bool CanValidate => Status != DocumentStatus.Unsafe && ProcessingCompletedAt is not null;
+}
 
 /// <summary>Filtered documents with the choices used by the editing form.</summary>
 public sealed record DocumentListResponse(List<DocumentResponse> Documents, List<StaffResponse> Staff,

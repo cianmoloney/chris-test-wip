@@ -11,6 +11,54 @@ namespace TestFunction;
 
 public sealed partial class API
 {
+    [Function(nameof(GetStaffRole))]
+    public Task<IActionResult> GetStaffRole([HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "staff-roles/{id:int}")] HttpRequest request,
+        int id, CancellationToken cancellationToken) => ExecuteAsync(request, async service =>
+            new OkObjectResult(await service.GetStaffRoleAsync(id, cancellationToken)), cancellationToken);
+
+    [Function(nameof(CreateStaffRole))]
+    public Task<IActionResult> CreateStaffRole([HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "staff-roles")] HttpRequest request,
+        CancellationToken cancellationToken) => ExecuteAsync(request, async service =>
+        {
+            var role = await service.CreateStaffRoleAsync(await ReadAsync<CreateStaffRoleRequest>(request, cancellationToken), cancellationToken);
+            return new CreatedResult($"/api/staff-roles/{role.Id}", role);
+        }, cancellationToken);
+
+    [Function(nameof(SaveStaffRoleDocuments))]
+    public Task<IActionResult> SaveStaffRoleDocuments(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "staff-roles/{id:int}/document-types")] HttpRequest request,
+        int id, CancellationToken cancellationToken) => ExecuteAsync(request, async service =>
+        {
+            await service.SaveStaffRoleDocumentsAsync(id, await ReadAsync<SaveStaffRoleDocumentsRequest>(request, cancellationToken), cancellationToken);
+            return new NoContentResult();
+        }, cancellationToken);
+
+    [Function(nameof(GetDocumentTypes))]
+    public Task<IActionResult> GetDocumentTypes([HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "document-types")] HttpRequest request,
+        CancellationToken cancellationToken) => ExecuteAsync(request, async service =>
+            new OkObjectResult(await service.GetDocumentTypeManagementAsync(cancellationToken)), cancellationToken);
+
+    [Function(nameof(GetDocumentType))]
+    public Task<IActionResult> GetDocumentType([HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "document-types/{id:int}")] HttpRequest request,
+        int id, CancellationToken cancellationToken) => ExecuteAsync(request, async service =>
+            new OkObjectResult(await service.GetDocumentTypeAsync(id, cancellationToken)), cancellationToken);
+
+    [Function(nameof(CreateDocumentType))]
+    public Task<IActionResult> CreateDocumentType([HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "document-types")] HttpRequest request,
+        CancellationToken cancellationToken) => ExecuteAsync(request, async service =>
+        {
+            var type = await service.CreateDocumentTypeAsync(await ReadAsync<SaveDocumentTypeRequest>(request, cancellationToken), cancellationToken);
+            return new CreatedResult($"/api/document-types/{type.Id}", type);
+        }, cancellationToken);
+
+    [Function(nameof(UpdateDocumentType))]
+    public Task<IActionResult> UpdateDocumentType([HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "document-types/{id:int}")] HttpRequest request,
+        int id, CancellationToken cancellationToken) => ExecuteAsync(request, async service =>
+        {
+            await service.UpdateDocumentTypeAsync(id, await ReadAsync<SaveDocumentTypeRequest>(request, cancellationToken), cancellationToken);
+            return new NoContentResult();
+        }, cancellationToken);
+
     [Function(nameof(ArchiveStaff))]
     public Task<IActionResult> ArchiveStaff([HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "staff/{id:int}")] HttpRequest request,
         int id, CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>
@@ -40,10 +88,7 @@ public sealed partial class API
         {
             var container = request.Query["container"].ToString();
             var blob = request.Query["blob"].ToString();
-            var document = await services.GetRequiredService<AppDbContext>().Documents.AsNoTracking()
-                .SingleOrDefaultAsync(document => document.ContainerName == container && document.BlobName == blob, cancellationToken)
-                ?? throw new ApiException(404, "File not found.");
-            if (!document.ScanPassed) throw new ApiException(409, "The file is unavailable until safety checks pass.");
-            return new OkObjectResult(new UploadResponse(container, blob));
+            return new OkObjectResult(await services.GetRequiredService<IFileAccessService>()
+                .AuthorizeAsync(container, blob, cancellationToken));
         }, cancellationToken);
 }

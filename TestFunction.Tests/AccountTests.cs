@@ -11,6 +11,95 @@ namespace TestFunction.Tests;
 public sealed class AccountTests
 {
     [Fact]
+    public async Task AdminCanGrantAndRevokeResponsibilitiesForExistingSessions()
+    {
+        await using var database = CreateDatabase();
+        database.Users.Add(new User { Id = 20, Email = "admin@example.test", RoleId = 2, PasswordHash = "unused" });
+        var user = (await database.Users.FindAsync(10))!;
+        user.RoleId = 3;
+        database.UserSessions.Add(new() { TokenHash = AccountService.HashToken("live-session"), UserId = 10, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1) });
+        await database.SaveChangesAsync();
+        var service = new AccountService(database, new RecordingEmail(), TimeProvider.System);
+        var actor = new UserResponse(20, "admin@example.test", 2, "Admin", true, false, []);
+        var request = new DefaultHttpContext().Request;
+        request.Headers["X-User-Session"] = "live-session";
+        Assert.Equal(403, (await Assert.ThrowsAsync<ApiException>(() => service.RequireAsync(request, Permissions.StaffWrite, default))).StatusCode);
+
+        await service.SaveRoleResponsibilitiesAsync(actor, 3, new() { Responsibilities = [Permissions.StaffRead, Permissions.StaffWrite] }, default);
+        database.ChangeTracker.Clear();
+        Assert.Contains(Permissions.StaffWrite, (await service.RequireAsync(request, Permissions.StaffWrite, default)).Permissions);
+        await service.SaveRoleResponsibilitiesAsync(actor, 3, new() { Responsibilities = [] }, default);
+        database.ChangeTracker.Clear();
+
+        Assert.Empty((await service.RequireAsync(request, null, default)).Permissions);
+        Assert.Equal(403, (await Assert.ThrowsAsync<ApiException>(() => service.RequireAsync(request, Permissions.StaffWrite, default))).StatusCode);
+        var rows = await database.Responsibilities.Where(responsibility => responsibility.RoleId == 3).ToListAsync();
+        Assert.Equal(Permissions.All.Length, rows.Count);
+        Assert.All(rows, responsibility => Assert.False(responsibility.IsEnabled));
+        Assert.Equal(2, await database.AuditEntries.CountAsync(entry => entry.Action == "Role.Responsibilities"));
+    }
+
+    [Theory]
+    [InlineData("HR")]
+    [InlineData("Foreman")]
+    public async Task NonAdminCannotManageRolesEvenWithAllResponsibilities(string role)
+    {
+        await using var database = CreateDatabase();
+        var service = new AccountService(database, new RecordingEmail(), TimeProvider.System);
+        var actor = new UserResponse(10, "user@example.test", role == "HR" ? 1 : 3, role, true, false, Permissions.All.ToList());
+        var before = await database.Responsibilities.CountAsync(responsibility => responsibility.IsEnabled);
+
+        Assert.Equal(403, (await Assert.ThrowsAsync<ApiException>(() => service.ListRolesAsync(actor, default))).StatusCode);
+        Assert.Equal(403, (await Assert.ThrowsAsync<ApiException>(() => service.SaveRoleResponsibilitiesAsync(actor, 1, new() { Responsibilities = [] }, default))).StatusCode);
+
+        Assert.Equal(before, await database.Responsibilities.CountAsync(responsibility => responsibility.IsEnabled));
+        Assert.Empty(await database.AuditEntries.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("Roles.Write")]
+    [InlineData("Staff.Write")]
+    [InlineData("Documents.Write")]
+    [InlineData("Documents.Validate")]
+    [InlineData("Links.Write")]
+    [InlineData("Terms.Write")]
+    public async Task UnknownOrDependentResponsibilitiesAreRejectedWithoutChanges(string permission)
+    {
+        await using var database = CreateDatabase();
+        var service = new AccountService(database, new RecordingEmail(), TimeProvider.System);
+        var actor = new UserResponse(10, "admin@example.test", 2, "Admin", true, false, []);
+        var before = await database.Responsibilities.CountAsync(responsibility => responsibility.IsEnabled);
+
+        var error = await Assert.ThrowsAsync<ApiException>(() => service.SaveRoleResponsibilitiesAsync(actor, 3, new() { Responsibilities = [permission] }, default));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Equal("Responsibilities", error.Field);
+        Assert.Equal(before, await database.Responsibilities.CountAsync(responsibility => responsibility.IsEnabled));
+    }
+
+    [Fact]
+    public async Task AdminWithoutOptionalPermissionsCanStillManageRoles()
+    {
+        await using var database = CreateDatabase();
+        (await database.Users.FindAsync(10))!.RoleId = 2;
+        database.UserSessions.Add(new() { TokenHash = AccountService.HashToken("admin-session"), UserId = 10, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1) });
+        await database.SaveChangesAsync();
+        var service = new AccountService(database, new RecordingEmail(), TimeProvider.System);
+        var request = new DefaultHttpContext().Request;
+        request.Headers["X-User-Session"] = "admin-session";
+        var actor = await service.RequireAdminAsync(request, default);
+
+        await service.SaveRoleResponsibilitiesAsync(actor, 2, new() { Responsibilities = [] }, default);
+        database.ChangeTracker.Clear();
+        var refreshed = await service.RequireAdminAsync(request, default);
+
+        Assert.Empty(refreshed.Permissions);
+        Assert.Equal(3, (await service.ListRolesAsync(refreshed, default)).Roles.Count);
+        await service.SaveRoleResponsibilitiesAsync(refreshed, 2, new() { Responsibilities = Permissions.All.ToList() }, default);
+        Assert.Equal(Permissions.All.Length, (await service.RequireAdminAsync(request, default)).Permissions.Count);
+    }
+
+    [Fact]
     public async Task ForemanCanValidateAndIssueLinksButCannotEditStaffOrManageAccounts()
     {
         await using var database = CreateDatabase();

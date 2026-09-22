@@ -55,8 +55,14 @@ public sealed partial class API
     [Function(nameof(ListTerms))]
     public Task<IActionResult> ListTerms([HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "terms")] HttpRequest request,
         CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>
-            new OkObjectResult(await services.GetRequiredService<AppDbContext>().TermsDocuments
+            new OkObjectResult(await services.GetRequiredService<AppDbContext>().TermsDocuments.AsNoTracking().OrderBy(terms => terms.Title)
                 .Select(terms => new TermsDocumentResponse(terms.Id, terms.Title)).ToListAsync(cancellationToken)), cancellationToken);
+
+    [Function(nameof(GetTermsVersions))]
+    public Task<IActionResult> GetTermsVersions(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "terms/{id:int}/versions")] HttpRequest request,
+        int id, CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>
+            new OkObjectResult(await services.GetRequiredService<TermsService>().GetVersionsAsync(id, cancellationToken)), cancellationToken);
 
     [Function(nameof(ResolveLink))]
     public Task<IActionResult> ResolveLink([HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "public/resolve")] HttpRequest request,
@@ -69,6 +75,15 @@ public sealed partial class API
         {
             var staff = await Links.RegisterAsync(await ReadAsync<LinkRegistrationRequest>(request, cancellationToken), cancellationToken);
             return new CreatedResult($"/api/staff/{staff.Id}", staff);
+        }, cancellationToken);
+
+    [Function(nameof(RegisterMultipleByLink))]
+    public Task<IActionResult> RegisterMultipleByLink(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "public/register-many")] HttpRequest request,
+        CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>
+        {
+            var result = await Links.RegisterMultipleAsync(await ReadAsync<LinkMultipleRegistrationRequest>(request, cancellationToken), cancellationToken);
+            return new CreatedResult("/api/staff", result);
         }, cancellationToken);
 
     [Function(nameof(AcceptByLink))]

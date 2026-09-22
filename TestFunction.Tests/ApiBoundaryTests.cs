@@ -297,7 +297,7 @@ public sealed class ApiBoundaryTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task DocumentDownloadRequiresSuccessfulSafetyScan(bool scanPassed)
+    public async Task DocumentDownloadDoesNotRequireExternalScan(bool scanPassed)
     {
         await using var database = Database();
         database.Documents.Add(new DocumentEntry
@@ -312,14 +312,28 @@ public sealed class ApiBoundaryTests
         var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance)
             .FileAccess(request, CancellationToken.None);
 
-        if (scanPassed)
-        {
-            var response = Assert.IsType<UploadResponse>(Assert.IsType<OkObjectResult>(result).Value);
-            Assert.Equal("uploads", response.ContainerName);
-            Assert.Equal("2026/09/certificate.pdf", response.BlobName);
-        }
-        else
-            Assert.Equal(409, Assert.IsType<ObjectResult>(result).StatusCode);
+        var response = Assert.IsType<UploadResponse>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Equal("uploads", response.ContainerName);
+        Assert.Equal("2026/09/certificate.pdf", response.BlobName);
+    }
+
+    [Theory]
+    [InlineData(true, 403)]
+    [InlineData(false, 401)]
+    public async Task UploadedFileAccessRequiresAuthenticatedReadPermission(bool signedIn, int expectedStatus)
+    {
+        await using var database = Database();
+        foreach (var permission in await database.Responsibilities.Where(permission => permission.RoleId == 2).ToListAsync())
+            permission.IsEnabled = false;
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+        var request = Request();
+        if (!signedIn) request.Headers.Remove("X-User-Session");
+        request.QueryString = new QueryString("?container=uploads&blob=untracked.pdf");
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance).FileAccess(request, default);
+
+        Assert.Equal(expectedStatus, Assert.IsType<ObjectResult>(result).StatusCode);
     }
 
     [Fact]
@@ -347,6 +361,61 @@ public sealed class ApiBoundaryTests
         Assert.Equal(20, accepted.TermsDocumentVersion.Id);
         Assert.Equal(accepted.AcceptedAt, reloaded.AcceptedAt);
         Assert.Single(await database.StaffTermsAcceptances.ToListAsync());
+    }
+
+    [Fact]
+    public async Task TermsHistoryContainsExactPublishedTextForAllVersionsAndLanguages()
+    {
+        await using var database = Database();
+        database.TermsDocuments.AddRange(new TermsDocument { Id = 20, Title = "Site terms" }, new TermsDocument { Id = 30, Title = "Other terms" });
+        database.TermsDocumentVersions.AddRange(
+            new() { Id = 21, TermsDocumentId = 20, Version = 1, Language = "en", Content = "Original accepted text", IsActive = false },
+            new() { Id = 22, TermsDocumentId = 20, Version = 2, Language = "uk", Content = "Current Ukrainian", IsActive = true },
+            new() { Id = 23, TermsDocumentId = 20, Version = 2, Language = "en", Content = "Current English\nLine two <not markup>", IsActive = true },
+            new() { Id = 24, TermsDocumentId = 20, Version = 2, Language = "pl", Content = "Current Polish", IsActive = true },
+            new() { Id = 31, TermsDocumentId = 30, Version = 9, Language = "en", Content = "Unrelated terms" });
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance).GetTermsVersions(Request(), 20, default);
+
+        var versions = Assert.IsType<List<TermsVersionResponse>>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Equal(new[] { 23, 24, 22, 21 }, versions.Select(version => version.Id));
+        Assert.All(versions, version => Assert.Equal(new TermsDocumentResponse(20, "Site terms"), version.TermsDocument));
+        Assert.Equal("Original accepted text", versions.Last().Content);
+        Assert.False(versions.Last().IsActive);
+        Assert.Equal("Current English\nLine two <not markup>", versions.First().Content);
+        Assert.Empty(await database.AuditEntries.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("Admin", 200)]
+    [InlineData("HR", 200)]
+    [InlineData("Foreman", 403)]
+    public async Task BrowsingTermsHistoryRequiresTermsManagementPermission(string role, int status)
+    {
+        await using var database = Database();
+        var user = await database.Users.SingleAsync(user => user.Id == 10001);
+        user.Role = await database.Roles.SingleAsync(candidate => candidate.Name == role);
+        database.TermsDocuments.Add(new() { Id = 20, Title = "Site terms" });
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance).GetTermsVersions(Request(), 20, default);
+
+        Assert.Equal(status, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task TermsHistoryDistinguishesEmptyDocumentFromUnknownDocument()
+    {
+        await using var database = Database();
+        database.TermsDocuments.Add(new() { Id = 20, Title = "Unpublished terms" });
+        await database.SaveChangesAsync();
+        var service = new TermsService(database);
+
+        Assert.Empty(await service.GetVersionsAsync(20, default));
+        Assert.Equal(404, (await Assert.ThrowsAsync<ApiException>(() => service.GetVersionsAsync(999, default))).StatusCode);
     }
 
     [Fact]
@@ -427,6 +496,231 @@ public sealed class ApiBoundaryTests
         Assert.Equal("Already registered.", exception.Errors["Email"][0]);
     }
 
+    [Theory]
+    [InlineData("HR")]
+    [InlineData("Foreman")]
+    [InlineData("Admin")]
+    public async Task OfficeRolesCanIssueUnassignedMultipleRegistrationLinks(string role)
+    {
+        await using var database = Database();
+        var user = await database.Users.SingleAsync(user => user.Id == 10001);
+        user.Role = await database.Roles.SingleAsync(candidate => candidate.Name == role);
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance)
+            .CreateLink(Request("{\"purpose\":\"register-many\",\"validHours\":24}"), default);
+
+        var issued = Assert.IsType<LinkResponse>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.Equal(ShareLinkPurposes.RegisterMultiple, issued.Purpose);
+        Assert.Null((await database.ShareLinks.SingleAsync()).StaffId);
+    }
+
+    [Fact]
+    public async Task MultipleRegistrationUsesCapabilityRatherThanOfficeSession()
+    {
+        await using var database = Database();
+        using var services = Services(database);
+        var request = Request("{\"token\":\"invalid\",\"staff\":[]}");
+        request.Headers.Remove("X-User-Session");
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance)
+            .RegisterMultipleByLink(request, default);
+
+        Assert.Equal(400, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Empty(await database.Staff.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("HR", true)]
+    [InlineData("Admin", true)]
+    [InlineData("Foreman", false)]
+    public async Task DocumentTypeManagementRequiresWritePermissionAndAuditsChanges(string role, bool allowed)
+    {
+        await using var database = Database();
+        var user = await database.Users.SingleAsync(user => user.Id == 10001);
+        user.Role = await database.Roles.SingleAsync(candidate => candidate.Name == role);
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+        var api = new API(new AllowRequests(), services, NullLogger<API>.Instance);
+        var request = Request("{\"name\":\"Induction\",\"textIdentifier\":\"INDUCTED\",\"staffRoleIds\":[1,2]}");
+        request.Method = "POST";
+        request.Path = "/api/document-types";
+
+        var result = await api.CreateDocumentType(request, default);
+        var list = await api.GetDocumentTypes(Request(), default);
+        var updateRequest = Request("{\"name\":\"Safe Pass\",\"textIdentifier\":\"SAFEPASS\",\"staffRoleIds\":[3]}");
+        updateRequest.Method = "PUT";
+        updateRequest.Path = "/api/document-types/1";
+        var updated = await api.UpdateDocumentType(updateRequest, 1, default);
+
+        if (allowed)
+        {
+            var created = Assert.IsType<CreatedResult>(result);
+            var type = Assert.IsType<DocumentTypeResponse>(created.Value);
+            Assert.Equal($"/api/document-types/{type.Id}", created.Location);
+            Assert.Equal(new[] { 1, 2 }, type.StaffRoleIds);
+            Assert.IsType<OkObjectResult>(list);
+            Assert.IsType<NoContentResult>(updated);
+            Assert.Contains(await database.AuditEntries.ToListAsync(), audit => audit.Action == nameof(API.CreateDocumentType));
+            Assert.Contains(await database.AuditEntries.ToListAsync(), audit => audit.Action == nameof(API.UpdateDocumentType));
+        }
+        else
+        {
+            Assert.Equal(403, Assert.IsType<ObjectResult>(result).StatusCode);
+            Assert.Equal(403, Assert.IsType<ObjectResult>(list).StatusCode);
+            Assert.Equal(403, Assert.IsType<ObjectResult>(updated).StatusCode);
+            Assert.False(await database.DocumentTypes.AnyAsync(type => type.Name == "Induction"));
+            Assert.Null((await database.DocumentTypes.FindAsync(1))!.TextIdentifier);
+            Assert.Empty(await database.AuditEntries.ToListAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData("HR", true)]
+    [InlineData("Admin", true)]
+    [InlineData("Foreman", false)]
+    public async Task StaffRoleManagementRequiresDocumentWriteAndAuditsChanges(string role, bool allowed)
+    {
+        await using var database = Database();
+        var user = await database.Users.SingleAsync(user => user.Id == 10001);
+        user.Role = await database.Roles.SingleAsync(candidate => candidate.Name == role);
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+        var api = new API(new AllowRequests(), services, NullLogger<API>.Instance);
+        var create = Request("{\"name\":\"Brick Layer\"}");
+        create.Method = "POST";
+        create.Path = "/api/staff-roles";
+        var update = Request("{\"documentTypeIds\":[1,2]}");
+        update.Method = "PUT";
+        update.Path = "/api/staff-roles/1/document-types";
+
+        var created = await api.CreateStaffRole(create, default);
+        var updated = await api.SaveStaffRoleDocuments(update, 1, default);
+        var read = await api.GetStaffRole(Request(), 1, default);
+
+        if (allowed)
+        {
+            var response = Assert.IsType<CreatedResult>(created);
+            var staffRole = Assert.IsType<LookupResponse>(response.Value);
+            Assert.Equal($"/api/staff-roles/{staffRole.Id}", response.Location);
+            Assert.IsType<OkObjectResult>(read);
+            Assert.IsType<NoContentResult>(updated);
+            Assert.Equal(2, await database.StaffRoleDocumentTypes.CountAsync(requirement => requirement.StaffRoleId == 1));
+            Assert.Contains(await database.AuditEntries.ToListAsync(), audit => audit.Action == nameof(API.CreateStaffRole));
+            Assert.Contains(await database.AuditEntries.ToListAsync(), audit => audit.Action == nameof(API.SaveStaffRoleDocuments));
+        }
+        else
+        {
+            Assert.Equal(403, Assert.IsType<ObjectResult>(created).StatusCode);
+            Assert.Equal(403, Assert.IsType<ObjectResult>(updated).StatusCode);
+            Assert.Equal(403, Assert.IsType<ObjectResult>(read).StatusCode);
+            Assert.False(await database.StaffRoles.AnyAsync(candidate => candidate.Name == "Brick Layer"));
+            Assert.Empty(await database.AuditEntries.ToListAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData("{}", 400)]
+    [InlineData("{\"documentTypeIds\":null}", 400)]
+    [InlineData("{\"documentTypeIds\":[999]}", 400)]
+    [InlineData("{\"documentTypeIds\":[]}", 204)]
+    public async Task StaffRoleRequirementsRequireAnExplicitValidSelection(string body, int status)
+    {
+        await using var database = Database();
+        database.StaffRoleDocumentTypes.Add(new() { StaffRoleId = 1, DocumentTypeId = 1 });
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance).SaveStaffRoleDocuments(Request(body), 1, default);
+
+        if (status == 204)
+        {
+            Assert.IsType<NoContentResult>(result);
+            Assert.Empty(await database.StaffRoleDocumentTypes.ToListAsync());
+        }
+        else
+        {
+            Assert.Equal(status, Assert.IsType<ObjectResult>(result).StatusCode);
+            Assert.Equal(1, (await database.StaffRoleDocumentTypes.SingleAsync()).DocumentTypeId);
+        }
+    }
+
+    [Theory]
+    [InlineData("Admin", true)]
+    [InlineData("HR", false)]
+    [InlineData("Foreman", false)]
+    public async Task OnlyAdminCanManageResponsibilitiesRegardlessOfGrantedPermissions(string role, bool allowed)
+    {
+        await using var database = Database();
+        var user = await database.Users.SingleAsync(user => user.Id == 10001);
+        user.Role = await database.Roles.Include(candidate => candidate.Responsibilities).SingleAsync(candidate => candidate.Name == role);
+        foreach (var permission in Permissions.All)
+        {
+            var responsibility = user.Role.Responsibilities.SingleOrDefault(responsibility => responsibility.Name == permission);
+            if (responsibility is null) user.Role.Responsibilities.Add(new() { Name = permission, IsEnabled = !allowed });
+            else responsibility.IsEnabled = !allowed;
+        }
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+        var api = new API(new AllowRequests(), services, NullLogger<API>.Instance);
+        var update = Request("{\"responsibilities\":[\"Staff.Read\",\"Staff.Write\"]}");
+        update.Method = "PUT";
+        update.Path = "/api/roles/3/responsibilities";
+
+        var listResult = await api.GetRoles(Request(), default);
+        var saveResult = await api.UpdateRoleResponsibilities(update, 3, default);
+
+        if (allowed)
+        {
+            Assert.IsType<RolesResponse>(Assert.IsType<OkObjectResult>(listResult).Value);
+            Assert.IsType<NoContentResult>(saveResult);
+            Assert.True(await database.Responsibilities.AnyAsync(responsibility => responsibility.RoleId == 3 && responsibility.Name == Permissions.StaffWrite && responsibility.IsEnabled));
+            Assert.Contains(await database.AuditEntries.ToListAsync(), entry => entry.Action == "Role.Responsibilities");
+        }
+        else
+        {
+            Assert.Equal(403, Assert.IsType<ObjectResult>(listResult).StatusCode);
+            Assert.Equal(403, Assert.IsType<ObjectResult>(saveResult).StatusCode);
+            Assert.Empty(await database.AuditEntries.ToListAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData("{}", 3, 400)]
+    [InlineData("{\"responsibilities\":null}", 3, 400)]
+    [InlineData("{\"responsibilities\":[\"Roles.Write\"]}", 3, 400)]
+    [InlineData("{\"responsibilities\":[]}", 999, 404)]
+    public async Task InvalidResponsibilityRequestsLeaveRoleUnchanged(string body, int roleId, int status)
+    {
+        await using var database = Database();
+        using var services = Services(database);
+        var before = await database.Responsibilities.CountAsync(responsibility => responsibility.IsEnabled);
+
+        var result = await new API(new AllowRequests(), services, NullLogger<API>.Instance)
+            .UpdateRoleResponsibilities(Request(body), roleId, default);
+
+        Assert.Equal(status, Assert.IsType<ObjectResult>(result).StatusCode);
+        Assert.Equal(before, await database.Responsibilities.CountAsync(responsibility => responsibility.IsEnabled));
+    }
+
+    [Fact]
+    public async Task AccountAccessDoesNotDependOnStaffReadPermission()
+    {
+        await using var database = Database();
+        foreach (var responsibility in await database.Responsibilities.Where(responsibility => responsibility.RoleId == 2).ToListAsync())
+            responsibility.IsEnabled = false;
+        await database.SaveChangesAsync();
+        using var services = Services(database);
+        var api = new API(new AllowRequests(), services, NullLogger<API>.Instance);
+
+        var current = Assert.IsType<UserResponse>(Assert.IsType<OkObjectResult>(await api.CurrentAccount(Request(), default)).Value);
+        Assert.Empty(current.Permissions);
+        Assert.Equal(403, Assert.IsType<ObjectResult>(await api.GetStaff(Request(), default)).StatusCode);
+        Assert.IsType<OkObjectResult>(await api.Logout(Request(), default));
+        Assert.Empty(await database.UserSessions.ToListAsync());
+    }
+
     private static IConfiguration Configuration(Dictionary<string, string?> values) => new ConfigurationBuilder().AddInMemoryCollection(values).Build();
 
     [Theory]
@@ -498,7 +792,12 @@ public sealed class ApiBoundaryTests
     private static ServiceProvider Services(AppDbContext database) => new ServiceCollection()
         .AddSingleton(database)
         .AddSingleton(new AccountService(database, new NoEmail(), TimeProvider.System))
-        .AddSingleton<IStaffDataService>(new StaffDataService(database)).BuildServiceProvider();
+        .AddSingleton(new TermsService(database))
+        .AddSingleton<IStaffDataService>(new StaffDataService(database))
+        .AddSingleton<IFileAccessService>(new FileAccessService(database,
+            new Azure.Storage.Blobs.BlobServiceClient(new Uri("https://storage.example.test")),
+            Configuration(new() { ["UploadsContainer"] = "uploads" }), NullLogger<FileAccessService>.Instance))
+        .AddSingleton(new LinkService(database, new StaffDataService(database), TimeProvider.System)).BuildServiceProvider();
 
     private sealed class NoEmail : IEmailService
     {

@@ -23,6 +23,8 @@ builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<LinkService>();
 builder.Services.AddScoped<TermsService>();
 builder.Services.AddSingleton<UploadStorage>();
+builder.Services.AddSingleton(provider => provider.GetRequiredService<UploadStorage>().Client);
+builder.Services.AddScoped<IFileAccessService, FileAccessService>();
 builder.Services.AddScoped<UploadService>();
 builder.Services.AddSingleton<IEmailService, EmailService>();
 builder.Services.AddSingleton(TimeProvider.System);

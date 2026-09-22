@@ -13,6 +13,9 @@ namespace TestFunction.Data
         [Required, MaxLength(128)]
         public string Name { get; set; } = string.Empty;
 
+        [MaxLength(256)]
+        public string? TextIdentifier { get; set; }
+
         public ICollection<DocumentEntry> Documents { get; set; } = new List<DocumentEntry>();
 
         public ICollection<StaffRoleDocumentType> RequiredByRoles { get; set; } = new List<StaffRoleDocumentType>();

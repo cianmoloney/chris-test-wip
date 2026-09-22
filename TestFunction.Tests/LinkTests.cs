@@ -11,6 +11,54 @@ namespace TestFunction.Tests;
 public sealed class LinkTests
 {
     [Fact]
+    public async Task MultipleRegistrationLinksAreGenericAndPurposeBound()
+    {
+        await using var database = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        database.Database.EnsureCreated();
+        var service = new LinkService(database, new StaffDataService(database), TimeProvider.System);
+        var issued = await service.CreateAsync(1, new(ShareLinkPurposes.RegisterMultiple, null, null), default);
+
+        var link = await service.RequireAsync(issued.Token, ShareLinkPurposes.RegisterMultiple, default);
+        Assert.Null(link.StaffId);
+        var resolved = await service.ResolveAsync(new(issued.Token, ShareLinkPurposes.RegisterMultiple), default);
+        Assert.NotNull(resolved.Lookups);
+        Assert.Null(resolved.Staff);
+        await Assert.ThrowsAsync<ApiException>(() => service.RequireAsync(issued.Token, ShareLinkPurposes.Register, default));
+        var assigned = await Assert.ThrowsAsync<ApiException>(() => service.CreateAsync(1, new(ShareLinkPurposes.RegisterMultiple, 7, null), default));
+        Assert.Equal(400, assigned.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("empty", "Staff")]
+    [InlineData("too-many", "Staff")]
+    [InlineData("invalid", "Staff[1].Email")]
+    [InlineData("duplicate", "Staff[1].Email")]
+    [InlineData("null", "Staff[1]")]
+    public async Task InvalidRegistrationBatchIsRejectedBeforeSaving(string scenario, string field)
+    {
+        await using var database = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        database.Database.EnsureCreated();
+        var service = new LinkService(database, new StaffDataService(database), TimeProvider.System);
+        var issued = await service.CreateAsync(1, new(ShareLinkPurposes.RegisterMultiple, null, null), default);
+        var first = new CreateStaffRequest { FirstName = "Alex", LastName = "Smith", Email = "alex@example.test", StaffTypeId = 1, StaffRoleId = 1 };
+        List<CreateStaffRequest> staff = scenario switch
+        {
+            "empty" => [],
+            "too-many" => Enumerable.Repeat(first, LinkMultipleRegistrationRequest.MaximumStaff + 1).ToList(),
+            "invalid" => [first, first with { Email = "invalid" }],
+            "duplicate" => [first, first with { Email = "ALEX@example.test" }],
+            _ => [first, null!]
+        };
+
+        var exception = await Assert.ThrowsAsync<ApiException>(() => service.RegisterMultipleAsync(new(issued.Token, staff), default));
+
+        Assert.Equal(400, exception.StatusCode);
+        Assert.Equal(field, exception.Field);
+        Assert.Empty(await database.Staff.ToListAsync());
+        Assert.Null((await database.ShareLinks.SingleAsync()).UsedAt);
+    }
+
+    [Fact]
     public async Task GenericLinksAreUniquePurposeBoundAndSingleUse()
     {
         await using var database = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);

@@ -20,7 +20,7 @@ using TestShared;
 
 namespace TestFunction;
 
-public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEmailService email,
+public class BackgroundWorker(AppDbContext database, BlobServiceClient storage, IEmailService email,
     IConfiguration configuration, TimeProvider clock, ILogger<BackgroundWorker> logger)
 {
     private readonly ILogger _logger = logger;
@@ -31,7 +31,7 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
     {
         var now = clock.GetUtcNow();
         var documents = await database.Documents.AsNoTracking().Include(document => document.Staff).Include(document => document.Type)
-            .Where(document => document.Staff != null && !document.Staff.IsArchived && document.IsValid && document.Status == DocumentStatus.Validated && document.ScanPassed)
+            .Where(document => document.Staff != null && !document.Staff.IsArchived && document.IsValid && document.Status == DocumentStatus.Validated)
             .ToListAsync(cancellationToken);
         var expiring = documents.Where(document => document.ExpiryDate is not null
             && document.ExpiryDate.Value.UtcDateTime.Date >= now.UtcDateTime.Date
@@ -63,7 +63,7 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
 
     public static bool IsReplacement(DocumentEntry expiring, DocumentEntry candidate) => expiring.Id != candidate.Id
         && expiring.StaffId != null && expiring.DocumentTypeId != null && candidate.StaffId == expiring.StaffId
-        && candidate.DocumentTypeId == expiring.DocumentTypeId && candidate.IsValid && candidate.ScanPassed
+        && candidate.DocumentTypeId == expiring.DocumentTypeId && candidate.IsValid
         && candidate.Status == DocumentStatus.Validated && !candidate.IsArchived && expiring.ExpiryDate is not null
         && (candidate.StartDate is null || candidate.StartDate.Value.UtcDateTime.Date <= expiring.ExpiryDate.Value.UtcDateTime.Date.AddDays(1))
         && (candidate.ExpiryDate is null || candidate.ExpiryDate.Value.UtcDateTime.Date > expiring.ExpiryDate.Value.UtcDateTime.Date);
@@ -73,7 +73,8 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
         string name, CancellationToken cancellationToken)
     {
         var container = configuration["UploadsContainer"]!;
-        var document = await database.Documents.SingleOrDefaultAsync(document => document.ContainerName == container && document.BlobName == name, cancellationToken);
+        var document = await database.Documents.IgnoreQueryFilters().SingleOrDefaultAsync(document => document.ContainerName == container && document.BlobName == name, cancellationToken);
+        if (document is { IsArchived: true } or { Status: DocumentStatus.Unsafe }) return;
         if (document is null)
         {
             var reservation = await database.ShareLinks.SingleOrDefaultAsync(link => link.ContainerName == container && link.BlobName == name, cancellationToken);
@@ -83,7 +84,7 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
                 var staffId = identifiers.StaffId is not null && await database.Staff.AnyAsync(staff => staff.Id == identifiers.StaffId, cancellationToken) ? identifiers.StaffId : null;
                 var typeId = identifiers.DocumentTypeId is not null && await database.DocumentTypes.AnyAsync(type => type.Id == identifiers.DocumentTypeId, cancellationToken) ? identifiers.DocumentTypeId : null;
                 document = new DocumentEntry { Name = Path.GetFileName(name), BlobName = name, ContainerName = container,
-                    StaffId = staffId, DocumentTypeId = typeId, Status = DocumentStatus.AwaitingScan, Issue = "Upload requires review." };
+                    StaffId = staffId, DocumentTypeId = typeId, Status = DocumentStatus.AwaitingProcessing, Issue = "Awaiting file checks and extraction." };
                 database.Documents.Add(document);
                 await database.SaveChangesAsync(cancellationToken);
             }
@@ -100,17 +101,17 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
         {
             link.LastUploadCheck = clock.GetUtcNow();
             await database.SaveChangesAsync(cancellationToken);
-            var blob = storage.Client.GetBlobContainerClient(link.ContainerName).GetBlobClient(link.BlobName);
+            var blob = storage.GetBlobContainerClient(link.ContainerName).GetBlobClient(link.BlobName);
             if (!await blob.ExistsAsync(cancellationToken)) continue;
             var properties = await blob.GetPropertiesAsync(cancellationToken: cancellationToken);
             if (!properties.Value.Metadata.TryGetValue("sha256", out var hash) || hash != link.ContentHash) continue;
             if (!await database.Documents.IgnoreQueryFilters().AnyAsync(document => document.ContainerName == link.ContainerName && document.BlobName == link.BlobName, cancellationToken))
                 database.Documents.Add(new() { ContainerName = link.ContainerName, BlobName = link.BlobName, Name = Path.GetFileName(link.BlobName!),
-                    StaffId = link.StaffId, DocumentTypeId = link.DocumentTypeId, Status = DocumentStatus.AwaitingScan });
+                    StaffId = link.StaffId, DocumentTypeId = link.DocumentTypeId, Status = DocumentStatus.AwaitingProcessing });
             link.UsedAt = clock.GetUtcNow();
             await database.SaveChangesAsync(cancellationToken);
         }
-        var pending = await database.Documents.Where(document => document.ProcessingCompletedAt == null && document.ContainerName != null)
+        var pending = await database.Documents.Where(document => document.ProcessingCompletedAt == null && document.ContainerName != null && document.Status != DocumentStatus.Unsafe)
             .OrderBy(document => document.LastProcessingAttempt).Select(document => document.Id).Take(100).ToListAsync(cancellationToken);
         foreach (var documentId in pending)
         {
@@ -125,24 +126,18 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
 
     private async Task ProcessDocumentAsync(DocumentEntry document, CancellationToken cancellationToken)
     {
-        if (document.ProcessingCompletedAt is not null) return;
+        if (document.ProcessingCompletedAt is not null || document.IsArchived || document.Status == DocumentStatus.Unsafe) return;
+        var wasRejected = document.Status == DocumentStatus.Rejected;
         document.LastProcessingAttempt = clock.GetUtcNow();
+        if (!wasRejected) document.Status = DocumentStatus.AwaitingProcessing;
+        document.Issue = "Awaiting file checks and extraction.";
         await database.SaveChangesAsync(cancellationToken);
-        var blob = storage.Client.GetBlobContainerClient(document.ContainerName).GetBlobClient(document.BlobName);
-        var tags = await blob.GetTagsAsync(cancellationToken: cancellationToken);
-        tags.Value.Tags.TryGetValue("Malware Scanning scan result", out var scan);
-        if (scan != "No threats found")
-        {
-            document.Status = scan == "Malicious" ? DocumentStatus.Unsafe : DocumentStatus.AwaitingScan;
-            document.Issue = scan == "Malicious" ? "File quarantined by malware scanning." : "Awaiting a successful malware scan.";
-            if (document.Status == DocumentStatus.Unsafe) document.ProcessingCompletedAt = clock.GetUtcNow();
-            await database.SaveChangesAsync(cancellationToken);
-            return;
-        }
+        var blob = storage.GetBlobContainerClient(document.ContainerName).GetBlobClient(document.BlobName);
         var properties = await blob.GetPropertiesAsync(cancellationToken: cancellationToken);
         if (properties.Value.ContentLength > UploadService.MaximumBytes)
         {
             document.Status = DocumentStatus.Unsafe;
+            document.IsValid = false;
             document.Issue = "File exceeds the processing limit.";
             document.ProcessingCompletedAt = clock.GetUtcNow();
             await database.SaveChangesAsync(cancellationToken);
@@ -157,12 +152,12 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
         if ((!isPdf && !isImage) || !IsFileSafe(memoryStream, isPdf, document.BlobName!))
         {
             document.Status = DocumentStatus.Unsafe;
+            document.IsValid = false;
             document.Issue = "Unsupported file or unsafe content.";
             document.ProcessingCompletedAt = clock.GetUtcNow();
             await database.SaveChangesAsync(cancellationToken);
             return;
         }
-        document.ScanPassed = true;
         memoryStream.Position = 0;
         try
         {
@@ -183,8 +178,9 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
             document.DocumentType = Limit(info.DocumentType, 128);
             document.StartDate = info.StartDate is null ? null : new DateTimeOffset(DateTime.SpecifyKind(info.StartDate.Value, DateTimeKind.Utc));
             document.ExpiryDate = info.EndDate is null ? null : new DateTimeOffset(DateTime.SpecifyKind(info.EndDate.Value, DateTimeKind.Utc));
-            if (document.DocumentTypeId is null && info.DocumentType is not null)
-                document.DocumentTypeId = await database.DocumentTypes.Where(type => type.Name == info.DocumentType).Select(type => (int?)type.Id).FirstOrDefaultAsync(cancellationToken);
+            var types = await database.DocumentTypes.AsNoTracking().ToListAsync(cancellationToken);
+            var typeMatch = DocumentTypeMatcher.Match(text, info.DocumentType, document.DocumentTypeId, types);
+            document.DocumentTypeId = typeMatch.TypeId;
             if (document.StaffId is null)
             {
                 var matches = info.Email is null ? [] : await database.Staff.Where(staff => staff.Email == info.Email).Select(staff => staff.Id).Take(2).ToListAsync(cancellationToken);
@@ -199,7 +195,10 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
             if (string.IsNullOrWhiteSpace(text) || document.StartDate > document.ExpiryDate)
                 throw new InvalidDataException("No readable text or inconsistent dates.");
             document.Status = DocumentStatus.PendingReview;
-            document.Issue = document.StaffId is null ? "Staff could not be matched; manual association required." : null;
+            var issues = new List<string>();
+            if (typeMatch.Issue is not null) issues.Add(typeMatch.Issue);
+            if (document.StaffId is null) issues.Add("Staff could not be matched; manual association required.");
+            document.Issue = issues.Count == 0 ? null : string.Join(" ", issues);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -207,6 +206,7 @@ public class BackgroundWorker(AppDbContext database, UploadStorage storage, IEma
             document.Status = DocumentStatus.ParseFailed;
             document.Issue = "Extraction failed. Review the file and enter its details manually.";
         }
+        if (wasRejected) document.Status = DocumentStatus.Rejected;
         document.IsValid = false;
         document.ProcessingCompletedAt = clock.GetUtcNow();
         await database.SaveChangesAsync(cancellationToken);

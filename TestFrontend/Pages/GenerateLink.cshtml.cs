@@ -44,6 +44,7 @@ namespace TestFrontend.Pages
 
             var purpose = LinkType switch
             {
+                ShareLinkPurposes.RegisterMultiple => ShareLinkPurposes.RegisterMultiple,
                 ShareLinkPurposes.Upload => ShareLinkPurposes.Upload,
                 ShareLinkPurposes.Terms => ShareLinkPurposes.Terms,
                 _ => ShareLinkPurposes.Register,
@@ -57,9 +58,10 @@ namespace TestFrontend.Pages
                     return Page();
                 }
             }
-            else if (purpose == ShareLinkPurposes.Register)
+            else if (purpose is ShareLinkPurposes.Register or ShareLinkPurposes.RegisterMultiple)
             {
                 StaffId = null; // registration links are anonymous
+                TermsDocumentId = null;
             }
 
             var hours = Math.Clamp(ValidHours, 1, 24 * 14);
@@ -77,6 +79,7 @@ namespace TestFrontend.Pages
 
             var page = purpose switch
             {
+                ShareLinkPurposes.RegisterMultiple => "/RegisterMultiple",
                 ShareLinkPurposes.Upload => "/Share",
                 ShareLinkPurposes.Terms => "/Terms",
                 _ => "/Register",

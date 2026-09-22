@@ -1,5 +1,6 @@
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using System.Net;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using TestFrontend.Services;
@@ -7,6 +8,7 @@ using TestShared;
 
 namespace TestFrontend.Pages
 {
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = Permissions.StaffRead)]
     public class FilesModel : PageModel
     {
         private readonly BlobServiceClient _blobServiceClient;
@@ -85,7 +87,7 @@ namespace TestFrontend.Pages
 
         public async Task<IActionResult> OnPostUploadAsync(IFormFile upload, CancellationToken cancellationToken)
         {
-            if (!User.HasClaim("permission", Permissions.DocumentsWrite)) return Forbid();
+            if (!User.HasClaim("permission", Permissions.DocumentsWrite) || !User.HasClaim("permission", Permissions.LinksWrite)) return Forbid();
             if (upload is null || upload.Length == 0)
             {
                 StatusMessage = "Please choose a file to upload.";
@@ -116,22 +118,35 @@ namespace TestFrontend.Pages
             try
             {
                 var container = containerName ?? ContainerName;
-                await _api.GetAsync<UploadResponse>($"files/access?container={Uri.EscapeDataString(container)}&blob={Uri.EscapeDataString(blobName)}", cancellationToken);
-                var blobClient = _blobServiceClient.GetBlobContainerClient(container).GetBlobClient(blobName);
+                var access = await _api.GetAsync<UploadResponse>($"files/access?container={Uri.EscapeDataString(container)}&blob={Uri.EscapeDataString(blobName)}", cancellationToken);
+                var blobClient = _blobServiceClient.GetBlobContainerClient(access.ContainerName).GetBlobClient(access.BlobName);
                 if (!await blobClient.ExistsAsync(cancellationToken))
                 {
-                    return NotFound();
+                    StatusMessage = "The file no longer exists in storage.";
+                    return RedirectToPage(new { prefix = Prefix });
                 }
 
                 var stream = await blobClient.OpenReadAsync(cancellationToken: cancellationToken);
-                var fileName = Path.GetFileName(blobName);
+                var fileName = Path.GetFileName(access.BlobName);
                 return File(stream, "application/octet-stream", fileName);
             }
-            catch (Exception ex)
+            catch (FunctionApiException ex) when (ex.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden
+                or HttpStatusCode.NotFound or HttpStatusCode.Conflict or HttpStatusCode.ServiceUnavailable)
+            {
+                _logger.LogWarning(ex, "Download not authorized for {Container}/{BlobName}.", containerName ?? ContainerName, blobName);
+                StatusMessage = ex.Message;
+                return RedirectToPage(new { prefix = Prefix });
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                StatusMessage = "The file no longer exists in storage.";
+                return RedirectToPage(new { prefix = Prefix });
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Failed to download blob {BlobName}", blobName);
                 StatusMessage = "Download failed. Please try again.";
-                return RedirectToPage();
+                return RedirectToPage(new { prefix = Prefix });
             }
         }
     }

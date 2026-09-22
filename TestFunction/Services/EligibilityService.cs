@@ -7,7 +7,7 @@ namespace TestFunction.Services;
 public sealed class EligibilityService(AppDbContext database, TimeProvider clock)
 {
     public static bool IsCurrent(DocumentEntry document, DateTimeOffset now) => document.IsValid
-        && document.Status == DocumentStatus.Validated && document.ScanPassed && !document.IsArchived
+        && document.Status == DocumentStatus.Validated && !document.IsArchived
         && (document.StartDate is null || document.StartDate.Value.UtcDateTime.Date <= now.UtcDateTime.Date)
         && (document.ExpiryDate is null || document.ExpiryDate.Value.UtcDateTime.Date >= now.UtcDateTime.Date);
 

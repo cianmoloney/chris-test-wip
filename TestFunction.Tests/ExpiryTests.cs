@@ -12,7 +12,7 @@ public sealed class ExpiryTests
         var end = new DateTimeOffset(2026, 9, 20, 0, 0, 0, TimeSpan.Zero);
         var old = new DocumentEntry { Id = 1, StaffId = 7, DocumentTypeId = 2, ExpiryDate = end };
         var replacement = new DocumentEntry { Id = 2, StaffId = 7, DocumentTypeId = 2, ExpiryDate = end.AddYears(1),
-            StartDate = end.AddDays(1), IsValid = true, Status = DocumentStatus.Validated, ScanPassed = true };
+            StartDate = end.AddDays(1), IsValid = true, Status = DocumentStatus.Validated, ScanPassed = false };
         Assert.True(BackgroundWorker.IsReplacement(old, replacement));
         replacement.StartDate = end.AddDays(2);
         Assert.False(BackgroundWorker.IsReplacement(old, replacement));

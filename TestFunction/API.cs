@@ -126,16 +126,19 @@ public sealed partial class API(IApiAuthorization authorization, IServiceProvide
                     request.HttpContext.Response.Headers.WWWAuthenticate = "Bearer";
                 return Problem(status, status == 401 ? "A valid application bearer token is required." : "The calling application is not permitted.");
             }
-            if (operation is not (nameof(Login) or nameof(VerifyMfa) or nameof(ResolveLink) or nameof(RegisterByLink) or nameof(AcceptByLink) or nameof(UploadByLink)))
+            if (operation is not (nameof(Login) or nameof(VerifyMfa) or nameof(ResolveLink) or nameof(RegisterByLink) or nameof(RegisterMultipleByLink) or nameof(AcceptByLink) or nameof(UploadByLink)))
             {
                 var permission = operation switch
                 {
+                    nameof(CurrentAccount) or nameof(Logout) or nameof(SetMfaPreference) or nameof(GetRoles) or nameof(UpdateRoleResponsibilities) => null,
                     nameof(CreateStaff) or nameof(UpdateStaff) => Permissions.StaffWrite,
                     nameof(UpdateDocument) or nameof(UpdateStaffDocument) or nameof(ReassignDocument) => Permissions.DocumentsWrite,
+                    nameof(GetDocumentTypes) or nameof(GetDocumentType) or nameof(CreateDocumentType) or nameof(UpdateDocumentType) => Permissions.DocumentsWrite,
+                    nameof(GetStaffRole) or nameof(CreateStaffRole) or nameof(SaveStaffRoleDocuments) => Permissions.DocumentsWrite,
                     nameof(SetDocumentStatus) => Permissions.DocumentsValidate,
                     nameof(GetUsers) or nameof(CreateUser) or nameof(UpdateUser) => Permissions.UsersWrite,
                     nameof(CreateLink) or nameof(RevokeLink) => Permissions.LinksWrite,
-                    nameof(PublishTerms) => Permissions.TermsWrite,
+                    nameof(PublishTerms) or nameof(GetTermsVersions) => Permissions.TermsWrite,
                     nameof(ArchiveStaff) => Permissions.StaffWrite,
                     nameof(ArchiveDocument) => Permissions.DocumentsWrite,
                     _ => Permissions.StaffRead

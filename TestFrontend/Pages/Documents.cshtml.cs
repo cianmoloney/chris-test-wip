@@ -10,6 +10,7 @@ namespace TestFrontend.Pages
     /// Admin page to review, validate, reject, edit, and associate uploaded
     /// documents with staff.
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = Permissions.StaffRead)]
     public class DocumentsModel : PageModel
     {
         private readonly FunctionApiClient _api;

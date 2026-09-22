@@ -1,0 +1,8 @@
+@page
+@{
+    ViewData["Title"] = "Access denied";
+    Response.StatusCode = StatusCodes.Status403Forbidden;
+}
+<h1>Access denied</h1>
+<p>Your role does not have permission to access this page.</p>
+<a asp-page="/Index">Home</a>

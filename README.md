@@ -127,6 +127,11 @@ the explicit local-only bypass above is enabled.
 | Method | Route (under `/api`) | Purpose |
 | --- | --- | --- |
 | GET | `/lookups` | Staff types, roles, document types, role requirements |
+| GET / POST | `/document-types` | HR/Admin document type catalog and creation, including text identifiers and required roles |
+| GET / PUT | `/document-types/{id}` | Read or update one document type and its role requirements |
+| POST | `/staff-roles` | Add a staff job role; requires Documents.Write |
+| GET | `/staff-roles/{id}` | Read a staff job role; requires Documents.Write |
+| PUT | `/staff-roles/{id}/document-types` | Replace one staff role's document requirements; requires Documents.Write |
 | GET | `/staff?filter=&sortBy=` | Filtered/sorted staff and latest acceptance times |
 | POST | `/staff` | Authorized office staff creation |
 | GET / PUT | `/staff/{id}` | Staff details with documents/history; update editable details |
@@ -139,12 +144,16 @@ the explicit local-only bypass above is enabled.
 | POST | `/accounts/login`, `/accounts/mfa`, `/accounts/logout` | Account session lifecycle |
 | GET / PUT | `/accounts/me`, `/accounts/me/mfa` | Current account / change MFA preference |
 | GET / POST / PUT | `/users`, `/users/{id}` | Authorized account administration |
+| GET | `/roles` | Admin-only role responsibilities and supported permission names |
+| PUT | `/roles/{id}/responsibilities` | Admin-only replacement of a role's enabled responsibilities |
 | GET / POST | `/terms` | List documents / publish a translated edition |
+| GET | `/terms/{id}/versions` | Terms management history including previous versions and all languages; requires Terms.Write |
 | POST | `/links` | Issue a purpose-scoped link and allocate terms |
 | DELETE | `/links/{id}` | Revoke an issued link |
 | POST | `/public/resolve`, `/public/register`, `/public/accept` | Capability-authorized worker operations |
+| POST | `/public/register-many` | Atomically register 1-25 staff using a single-use multiple registration link |
 | POST | `/public/upload` | Multipart `token`, `file`, optional `documentTypeId` |
-| GET | `/files/access?container=&blob=` | Authorize a scanned-file download |
+| GET | `/files/access?container=&blob=` | Authorize a file download, blocking archived or quarantined documents |
 
 Office requests also carry the opaque `X-User-Session` header. Do not send it
 from a browser directly to the Function. The legacy office acceptance endpoint
@@ -174,24 +183,67 @@ still require integration verification against the configured services.
 
 - HR/Admin can create, edit and archive staff/documents, reassign documents,
 	manage non-Admin accounts, publish translated terms and issue secure links.
-- Foreman can view staff/documents, validate documents and issue all three link
+- HR/Admin can use **Role Manager** (formerly Document Types, retaining the
+	`/DocumentTypes` route) to select a staff job role, check its required document
+	types, and save. Saving replaces only that role's requirements; an empty
+	selection clears them. **Add staff role** persists a new job role and selects
+	it in the dropdown. **Add document type** creates a new unchecked option,
+	including its literal `TextIdentifier`. Editing a document type's name or
+	identifier preserves its existing role assignments. Role selections persist in
+	`StaffRoleDocumentTypes` and immediately affect readiness and required-document
+	lists, including registration lookups. This manages staff job roles, not the
+	Admin-only office **Roles & Responsibilities** page. New role-manager operations
+	reuse the existing schema; deploy both the Function and frontend.
+	Processing matches identifiers case-insensitively with normalized
+	whitespace. Missing or ambiguous matches are flagged for human review;
+	matching text never automatically validates a document. Existing types with
+	no identifier retain legacy name matching until HR configures them. Changes
+	apply to subsequent processing, not already-processed documents.
+	Publish the database first to add nullable `DocumentTypes.TextIdentifier`
+	(`NVARCHAR(256)`), then deploy the Function and frontend. No data backfill is
+	required. Subsequent database publishes preserve HR-managed types and role
+	requirements; defaults are seeded only into an empty document-type catalog.
+- Foreman can view staff/documents, validate documents and issue all four link
 	types. Backend permissions enforce these boundaries, not just hidden buttons.
 - Users have one application role with configurable role responsibilities.
 	Admin uses email as their username. Disabling an account or changing its
 	credentials revokes sessions. HR cannot grant or modify Admin accounts.
+- Admin can use **Roles & Responsibilities** to enable or disable the supported
+	permissions for existing roles. Changes are audited and apply to signed-in
+	users on their next request. Disabled permissions remain stored with
+	`IsEnabled = 0`, so publishing reference data does not silently re-enable them.
+	Role management itself is reserved for the Admin role, not a grantable
+	responsibility; Admin retains that page even with all optional permissions
+	disabled. Account details, MFA settings and sign-out remain available without
+	`Staff.Read`. Staff editing, document editing/validation, links and terms require
+	`Staff.Read`; invalid combinations are rejected. File uploads additionally need
+	both `Documents.Write` and `Links.Write`. The page edits grants, not role names
+	or new permission definitions. This feature needs frontend and Function
+	deployment only; it reuses the existing Roles and Responsibilities tables.
 - MFA is optional for every role and disabled by default. Codes expire after
 	five minutes, permit five attempts and are rate-limited. Five password failures
 	lock sign-in for fifteen minutes.
 - Registration links are unbound and consumed atomically with successful
-	registration. Upload links can be generic or worker-specific. Reservations are
+	registration. Multiple registration links use purpose `register-many` and open
+	`/RegisterMultiple`. HR, Foreman and Admin can issue them without selecting
+	existing staff. Add/remove entries before choosing **Register all**; a batch
+	contains 1-25 people and either all are saved or none are. Validation failures
+	preserve the entries and leave the link available for correction; a successful
+	batch consumes it once. Single registration links continue to work separately.
+	Upload links can be generic or worker-specific. Reservations are
 	bound to a content hash; retries cannot replace another file. Successful
 	uploads consume the link. Previously issued stateless links no longer work.
 - Terms links bind a worker and edition. Published text is immutable, with
 	English/Polish/Ukrainian versions. One language acceptance satisfies an edition.
+	**Manage Terms** opens in read-only browsing mode: choose a terms document,
+	then a version/language to view its exact published text. **Add a new version**
+	opens a separate draft prefilled from the latest translations; publishing
+	creates a new version rather than editing history. **Add terms document**
+	starts a separate document. Cancel leaves published terms unchanged.
 	Publishing updates existing assignments and requires fresh acceptance; issue
 	new terms links. Acceptance records the version actually displayed, in UTC.
 	A bearer link is not independent identity proof or a qualified e-signature.
-- Readiness requires a current, scanned, human-validated document for each job
+- Readiness requires a current, human-validated document for each job
 	requirement and acceptance of every assigned terms edition. Dates are inclusive
 	UTC calendar dates; missing expiry means no expiry. Metadata or association
 	edits require renewed document validation.
@@ -272,7 +324,7 @@ also configure the relevant host/trigger `clientId`.
 	 Test upgrades against a copy of production data.
 2. Enable managed identities. Frontend needs Storage Blob Data Reader and the
 	 API application permission. Function needs SQL database permissions and the
-	 Storage data-plane roles for uploads, triggers and scan-tag reads. Blob
+	 Storage data-plane roles for uploads, triggers and blob reads. Blob
 	 triggers also need queue access. Configure host storage identity separately.
 	 Remove storage keys and frontend SQL access. Control-plane Contributor is
 	 not equivalent to a SQL database grant.
@@ -280,12 +332,26 @@ also configure the relevant host/trigger `clientId`.
 	 permission for the Function identity. Configure Vision endpoint and Cognitive
 	 Services data permission. Clients use identity, not keys. Verify each service
 	 connection in Azure.
-4. Configure trusted upload malware scanning, for example Defender for Storage.
-	 Processing requires the blob index tag `Malware Scanning scan result` with
-	 value `No threats found`. Missing/error/unsafe results block approval and
-	 downloads. No scanner or paid Azure resource is provisioned here. Uploads
-	 intentionally remain blocked until scanning is configured. Arrange scanning
-	 of legacy files too; restrict tag-writing permissions to trusted identities.
+4. External malware scanning is not required or performed. Defender for Storage
+	 and scanner tags are not used. Upload type/size limits, basic PDF/image checks,
+	 access permissions and manual document approval remain in place; these are
+	 **not antivirus protection**. Downloaded files may be unscanned. Existing
+	 quarantined/archived documents remain blocked and cannot be cleared through
+	 approval, rejection or metadata edits. Upload a replacement for an unsafe file.
+	 `ScanPassed` is retained as historical data and is neither required nor set by
+	 the current processing path. New uploads are `AwaitingProcessing`; legacy
+	 `AwaitingScan` records are displayed as awaiting processing and retried by the
+	 five-minute recovery worker when processing is incomplete. File checks and
+	 extraction must complete before manual approval; parse failures can then be
+	 corrected and reviewed manually. Rejection does not bypass processing.
+	 **Uploaded Files** lists blobs independently of the Documents catalog. Existing
+	 untracked blobs can be downloaded only from `UploadsContainer`, with no scan-tag
+	 request. Older document rows without a container resolve only against that
+	 container. Keep frontend `AzureStorage:ContainerName` aligned with Function
+	 `UploadsContainer` and point both apps at the same storage account.
+	 Deploy both Function and frontend for these changes; no schema migration or
+	 bulk update of scan flags is needed. Azure services are not enabled or disabled
+	 by this code; separately turn off any paid scanning plan you previously enabled.
 5. Set `UploadsContainer=uploads` for both new uploads and the blob trigger.
 	 Blob names use the UTC path `YYYY/MM/`, optional `SID{Staff.Id}_` and
 	 `DTID_{DocumentTypeId}_`, a unique upload ID, and a sanitized filename.
@@ -306,8 +372,8 @@ also configure the relevant host/trigger `clientId`.
 8. Enable background functions only after dependencies are configured. Use a
 	 supported .NET 10 isolated Functions host and verify PDF native libraries on
 	 the hosting OS. Limits: 20 MB per upload, 50 bounded-size PDF pages, 40 million
-	 image pixels. Scan/extraction issues appear in the review queue. OCR failures
-	 can be manually reviewed only after safety scanning passes.
+	 image pixels. File-check/extraction issues appear in the review queue. OCR
+	 failures can be manually reviewed once processing finishes, unless quarantined.
 
 Expiry emails run at 05:00 UTC to enabled HR accounts. A validated replacement
 must cover the same worker/type without a gap after the old certificate. Daily
@@ -329,5 +395,5 @@ dotnet test TestFunction.Tests/TestFunction.Tests.csproj -c Release
 ```
 
 Release output avoids conflicts with an existing Debug server. Deployed identity,
-blob events, malware scan results, OCR and ACS delivery require end-to-end tests
+blob events, OCR and ACS delivery require end-to-end tests
 with configured Azure resources; placeholders do not verify those integrations.

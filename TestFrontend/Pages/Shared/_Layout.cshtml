@@ -19,29 +19,42 @@
                     <span class="navbar-toggler-icon"></span>
                 </button>
                 <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
+                    <ul class="navbar-nav flex-grow-1 flex-wrap">
                         <li class="nav-item">
                             <a class="nav-link text-dark" asp-area="" asp-page="/Index">Home</a>
                         </li>
                         @if (User.Identity?.IsAuthenticated == true)
                         {
+                            @if (User.HasClaim("permission", TestShared.Permissions.StaffRead))
+                            {
                             <li class="nav-item">
-                                <a class="nav-link text-dark" asp-area="" asp-page="/Files">File Explorer</a>
+                                <a class="nav-link text-dark" asp-area="" asp-page="/Files">Uploaded Files</a>
                             </li>
+                            }
                             <li class="nav-item"><a class="nav-link text-dark" asp-page="/Account">Account</a></li>
+                            @if (User.IsInRole("Admin"))
+                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Roles">Roles &amp; Responsibilities</a></li> }
                             @if (User.HasClaim("permission", TestShared.Permissions.UsersWrite))
                             { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Users">Users</a></li> }
                             @if (User.HasClaim("permission", TestShared.Permissions.TermsWrite))
-                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/ManageTerms">Terms editions</a></li> }
+                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/ManageTerms">Manage Terms</a></li> }
+                            @if (User.HasClaim("permission", TestShared.Permissions.DocumentsWrite))
+                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/DocumentTypes">Role Manager</a></li> }
+                            @if (User.HasClaim("permission", TestShared.Permissions.StaffRead))
+                            {
                             <li class="nav-item">
                                 <a class="nav-link text-dark" asp-area="" asp-page="/Staff">Staff</a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link text-dark" asp-area="" asp-page="/Documents">Document Explorer</a>
                             </li>
+                            }
+                            @if (User.HasClaim("permission", TestShared.Permissions.LinksWrite))
+                            {
                             <li class="nav-item">
                                 <a class="nav-link text-dark" asp-area="" asp-page="/GenerateLink">Generate Link</a>
                             </li>
+                            }
                         }
                     </ul>
                     @if (User.Identity?.IsAuthenticated == true)

@@ -43,6 +43,14 @@ A member of [Staff] is only Ready for work if they have signed all [Terms] alloc
 **3. Actor Functionality**
 ==================================================
 
+*FOREMAN*
+The Foreman [Users], will login with their email and password. They will not require MFA, which is optional, but disabled by default. 
+
+The Foreman [Users] can easily generate the same links the the HR User can do, and in the same way. 
+
+The Foreman [Users] can also View [Staff] information, most importantly, viewing their [Documents], and making sure that they are able to work. The Foreman [Users] can also perform the same Validation check that the HR [Users] can do.
+
+
 *HR*
 The HR  [Users], will login with their email and password. They can optionally signed up for MFA, in which case they'll have to input the code sent to their email. 
 
@@ -77,12 +85,6 @@ If they select a [DocumentType], the DTID_{number} is prepended to the Blob file
 
 When [Staff] access the "Terms" page, they'll be shown text regarding their role, to which they have to tick "agree", which is then persisted in the database along with the terms version, and time in UTC. There should be a many:many relationship between a [Staff] and [Terms], as there might be several different terms they have to accept over the course of their role. Every time they accept terms, there's a record of what the terms were and when they were accepted.
 
-*FOREMAN*
-The Foreman [Users], will login with their email and password. They will not require MFA, which is optional, but disabled by default. 
-
-The Foreman [Users] can easily generate the same links the the HR User can do, and in the same way. 
-
-The Foreman [Users] can also View [Staff] information, most importantly, viewing their [Documents], and making sure that they are able to work. The Foreman [Users] can also perform the same Validation check that the HR [Users] can do.
 
 
 *ADMIN*

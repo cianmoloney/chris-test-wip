@@ -45,15 +45,14 @@ INSERT INTO dbo.StaffRoles (Name)
 SELECT source.Name FROM (VALUES (N'Driver'), (N'Carpenter'), (N'Electrician')) source(Name)
 WHERE NOT EXISTS (SELECT 1 FROM dbo.StaffRoles target WHERE target.Name = source.Name);
 
-INSERT INTO dbo.DocumentTypes (Name)
-SELECT source.Name FROM (VALUES (N'Safe Pass'), (N'Forklift')) source(Name)
-WHERE NOT EXISTS (SELECT 1 FROM dbo.DocumentTypes target WHERE target.Name = source.Name);
+IF NOT EXISTS (SELECT 1 FROM dbo.DocumentTypes)
+BEGIN
+    INSERT INTO dbo.DocumentTypes (Name) VALUES (N'Safe Pass'), (N'Forklift');
 
-INSERT INTO dbo.StaffRoleDocumentTypes (StaffRoleId, DocumentTypeId)
-SELECT role.Id, documentType.Id FROM dbo.StaffRoles role CROSS JOIN dbo.DocumentTypes documentType
-WHERE role.Name = N'Driver' AND documentType.Name IN (N'Safe Pass', N'Forklift')
-AND NOT EXISTS (SELECT 1 FROM dbo.StaffRoleDocumentTypes target
-                WHERE target.StaffRoleId = role.Id AND target.DocumentTypeId = documentType.Id);
+    INSERT INTO dbo.StaffRoleDocumentTypes (StaffRoleId, DocumentTypeId)
+    SELECT role.Id, documentType.Id FROM dbo.StaffRoles role CROSS JOIN dbo.DocumentTypes documentType
+    WHERE role.Name = N'Driver' AND documentType.Name IN (N'Safe Pass', N'Forklift');
+END;
 
 UPDATE dbo.Documents SET Name = COALESCE(BlobName, N'Document') WHERE Name = N'';
 UPDATE dbo.Documents SET ContainerName = N'$(LegacyUploadsContainer)' WHERE ContainerName IS NULL AND BlobName IS NOT NULL;

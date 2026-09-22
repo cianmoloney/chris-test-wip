@@ -11,6 +11,25 @@ public sealed partial class API
 {
     private AccountService Accounts => services.GetRequiredService<AccountService>();
 
+    [Function(nameof(GetRoles))]
+    public Task<IActionResult> GetRoles([HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "roles")] HttpRequest request,
+        CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>
+        {
+            var actor = await Accounts.RequireAdminAsync(request, cancellationToken);
+            return new OkObjectResult(await Accounts.ListRolesAsync(actor, cancellationToken));
+        }, cancellationToken);
+
+    [Function(nameof(UpdateRoleResponsibilities))]
+    public Task<IActionResult> UpdateRoleResponsibilities(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "roles/{id:int}/responsibilities")] HttpRequest request,
+        int id, CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>
+        {
+            var actor = await Accounts.RequireAdminAsync(request, cancellationToken);
+            await Accounts.SaveRoleResponsibilitiesAsync(actor, id,
+                await ReadAsync<SaveRoleResponsibilitiesRequest>(request, cancellationToken), cancellationToken);
+            return new NoContentResult();
+        }, cancellationToken);
+
     [Function(nameof(Login))]
     public Task<IActionResult> Login([HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "accounts/login")] HttpRequest request,
         CancellationToken cancellationToken) => ExecuteAsync(request, async _ =>

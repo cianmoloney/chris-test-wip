@@ -14,9 +14,11 @@ public sealed class LinkService(AppDbContext database, IStaffDataService staffDa
         database.ChangeTracker.Clear();
         await using var transaction = database.Database.IsRelational()
             ? await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken) : null;
-        if (request.Purpose is not ("register" or "upload" or "terms")) throw new ApiException(400, "Invalid link purpose.");
+        if (request.Purpose is not (ShareLinkPurposes.Register or ShareLinkPurposes.RegisterMultiple or ShareLinkPurposes.Upload or ShareLinkPurposes.Terms))
+            throw new ApiException(400, "Invalid link purpose.");
         if (request.ValidHours is < 1 or > 336) throw new ApiException(400, "Link duration must be 1 to 336 hours.");
-        if (request.Purpose == "register" && request.StaffId is not null) throw new ApiException(400, "Registration links cannot identify existing staff.");
+        if (request.Purpose is ShareLinkPurposes.Register or ShareLinkPurposes.RegisterMultiple && request.StaffId is not null)
+            throw new ApiException(400, "Registration links cannot identify existing staff.");
         if (request.StaffId is not null && !await database.Staff.AnyAsync(staff => staff.Id == request.StaffId, cancellationToken))
             throw new ApiException(400, "Staff record not found.");
         var token = AccountService.NewToken();
@@ -97,6 +99,51 @@ public sealed class LinkService(AppDbContext database, IStaffDataService staffDa
             await database.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return staff;
+        });
+
+    public Task<MultipleRegistrationResponse> RegisterMultipleAsync(LinkMultipleRegistrationRequest request, CancellationToken cancellationToken) =>
+        database.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            database.ChangeTracker.Clear();
+            if (request.Staff is null || request.Staff.Count is < 1 or > LinkMultipleRegistrationRequest.MaximumStaff)
+                throw new ApiException(400, $"Register between 1 and {LinkMultipleRegistrationRequest.MaximumStaff} staff members.", "Staff");
+            var emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var index = 0; index < request.Staff.Count; index++)
+            {
+                var staff = request.Staff[index];
+                if (staff is null) throw new ApiException(400, "Staff details are required.", $"Staff[{index}]");
+                var errors = new List<ValidationResult>();
+                if (!Validator.TryValidateObject(staff, new ValidationContext(staff), errors, true))
+                {
+                    var field = errors[0].MemberNames.FirstOrDefault();
+                    throw new ApiException(400, errors[0].ErrorMessage ?? "Invalid staff details.",
+                        field is null ? $"Staff[{index}]" : $"Staff[{index}].{field}");
+                }
+                if (!emails.Add(staff.Email.Trim()))
+                    throw new ApiException(400, "Each staff member must have a different email address.", $"Staff[{index}].Email");
+            }
+
+            await using var transaction = await database.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+            await RequireAsync(request.Token, ShareLinkPurposes.RegisterMultiple, cancellationToken);
+            var registered = new List<StaffResponse>();
+            for (var index = 0; index < request.Staff.Count; index++)
+            {
+                try
+                {
+                    var staff = request.Staff[index];
+                    registered.Add(await staffData.CreateStaffAsync(staff with { Email = staff.Email.Trim() }, cancellationToken));
+                }
+                catch (ApiException exception)
+                {
+                    throw new ApiException(exception.StatusCode, exception.Message,
+                        exception.Field is null ? $"Staff[{index}]" : $"Staff[{index}].{exception.Field}");
+                }
+            }
+            var link = await RequireAsync(request.Token, ShareLinkPurposes.RegisterMultiple, cancellationToken);
+            link.UsedAt = clock.GetUtcNow();
+            await database.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return new MultipleRegistrationResponse(registered);
         });
 
     public Task<TermsAcceptanceResponse> AcceptAsync(LinkAcceptanceRequest request, CancellationToken cancellationToken) =>

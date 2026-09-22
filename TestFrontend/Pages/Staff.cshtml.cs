@@ -8,6 +8,7 @@ namespace TestFrontend.Pages
     /// <summary>
     /// Admin page listing registered staff with filtering and sorting.
     /// </summary>
+    [Microsoft.AspNetCore.Authorization.Authorize(Policy = TestShared.Permissions.StaffRead)]
     public class StaffModel : PageModel
     {
         private readonly FunctionApiClient _api;
