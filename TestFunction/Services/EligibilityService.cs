@@ -33,6 +33,7 @@ public sealed class EligibilityService(AppDbContext database, TimeProvider clock
         return staff.ToDictionary(worker => worker.Id, worker =>
         {
             var reasons = new List<string>();
+            var missingTerms = new List<MissingTermsResponse>();
             if (worker.StaffRoleId is null) reasons.Add("No job role assigned.");
             foreach (var requirement in requirements.Where(requirement => requirement.StaffRoleId == worker.StaffRoleId))
                 if (!documents.Any(document => document.StaffId == worker.Id && document.DocumentTypeId == requirement.DocumentTypeId && IsCurrent(document, clock.GetUtcNow())))
@@ -44,14 +45,18 @@ public sealed class EligibilityService(AppDbContext database, TimeProvider clock
                 if (document.LatestVersion is null)
                 {
                     reasons.Add($"Required terms have no published version: {document.Title}.");
+                    missingTerms.Add(new(document.Id, document.Title, null));
                     continue;
                 }
                 var requiredVersion = Math.Max(document.LatestVersion.Value, workerAssignments.GetValueOrDefault(document.Id)?.Version ?? 0);
                 if (!acceptances.Any(acceptance => acceptance.StaffId == worker.Id
                     && acceptance.TermsDocumentVersion.TermsDocumentId == document.Id && acceptance.TermsDocumentVersion.Version == requiredVersion))
+                {
                     reasons.Add($"Terms outstanding: {document.Title}, version {requiredVersion}.");
+                    missingTerms.Add(new(document.Id, document.Title, requiredVersion));
+                }
             }
-            return new ReadinessResponse(reasons.Count == 0, reasons);
+            return new ReadinessResponse(reasons.Count == 0, reasons) { MissingTerms = missingTerms };
         });
     }
 }

@@ -226,6 +226,8 @@ Set `FRONTEND_TEST_CONFIGURATION` to test a different build configuration or
 Set `BROWSER_TEST_SUITE=navigation` to run only the header checks.
 Set `BROWSER_TEST_SUITE=quick-actions` for the header, homepage and signed-in
 upload checks, including selected types, validation, errors and permission denial.
+Set `BROWSER_TEST_SUITE=staff-member` to also check work-status banners and
+missing-terms summaries, acceptance history, permissions and mobile layouts.
 Set `BROWSER_TEST_SUITE=role-terms` to also check role-required terms assignment,
 clearing, moving, stale-save handling and permissions on desktop/mobile.
 The check covers navigation order, permission visibility, account access,
@@ -238,14 +240,16 @@ to a published disposable database named `HrImplementationVerification_*`.
 
 ## Workflow Rules
 
-- The header shows Uploaded Files, Staff, Document Explorer, Generate Link,
-  Terms, Accounts, then Admin-only Access Editor, subject to existing permissions.
+- The header shows Manage Staff, Document Explorer, Generate Link,
+	Manage Terms, Accounts, then Admin-only Access Editor, subject to existing permissions.
   The app name links home; the person icon beside Sign out opens My account.
+	Uploaded Files (`/Files`) is a button on Document Explorer, not a header link.
+	The footer credits MSTMC with a mailto link to moloneysheehanltd@gmail.com.
   Staff Roles & Document Types is available from Staff with `Documents.Write`.
   Header labels and page titles change without changing routes or permissions.
 	The icons are locally hosted from `lucide-static` 0.468.0, with their
   upstream license in `TestFrontend/wwwroot/lib/lucide/LICENSE`.
-- Home displays **Quick Actions**: Staff Links, Document Explorer, Staff Viewer,
+- Home displays **Quick Actions**: Generate Link for Staff, Document Explorer, Manage Staff,
 	and Upload File, subject to permissions. Document Explorer opens `/Documents`,
 	not the raw Uploaded Files browser. **Upload File** (`/UploadFile`) is also
 	linked from Document Explorer and requires `Staff.Read`, `Documents.Write`
@@ -363,9 +367,21 @@ to a published disposable database named `HrImplementationVerification_*`.
 	Links to issue a terms link for each outstanding document. Dates are inclusive
 	UTC calendar dates; missing expiry means no expiry. Metadata or association
 	edits require renewed document validation.
+- Staff Member shows a green **Ready for work** or red **Not Ready** banner
+	with blocking reasons. Agreements lists missing required terms and editions,
+	including unpublished requirements, from the same readiness calculation.
+	Role-required and individually assigned terms are combined without duplicates;
+	acceptance history remains visible. Deploy the Function and frontend together
+	for the structured missing-terms response; no database change is required.
 - Removal archives staff/documents or disables office accounts, preserving
 	history. Hard deletion and jurisdiction-specific retention remain policy
-	decisions. Existing Contract staff retain their original E-prefixed IDs.
+	decisions.
+- Staff IDs use `P` for Permanent and `C` for Contract/Contractor, followed by
+	the database-generated staff number. Publish the SQL project to update an
+	existing Contract/External staff-type prefix from `E` to `C`; new standalone
+	databases seed `C` directly. No application change is required. Existing
+	E-prefixed staff IDs are not bulk-renumbered; saving with the Contract staff
+	type regenerates the ID with `C` and preserves the staff number.
 - Worker pages use local en/pl/uk resources. Legal text comes from approved
 	stored translations, not machine translation.
 

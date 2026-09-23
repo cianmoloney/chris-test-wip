@@ -7,13 +7,19 @@
 
 <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap mb-3">
     <h1 class="mb-0">Document Explorer</h1>
-    @if (User.HasClaim("permission", Permissions.DocumentsWrite) && User.HasClaim("permission", Permissions.LinksWrite))
-    {
-        <a asp-page="/UploadFile" class="btn btn-outline-primary d-inline-flex align-items-center gap-2">
-            <img src="~/lib/lucide/upload.svg" width="20" height="20" alt="" />
-            Upload File
+    <div class="d-flex gap-2 flex-wrap">
+        <a asp-page="/Files" class="btn btn-outline-primary d-inline-flex align-items-center gap-2">
+            <img src="~/lib/lucide/files.svg" width="20" height="20" alt="" />
+            Uploaded Files
         </a>
-    }
+        @if (User.HasClaim("permission", Permissions.DocumentsWrite) && User.HasClaim("permission", Permissions.LinksWrite))
+        {
+            <a asp-page="/UploadFile" class="btn btn-outline-primary d-inline-flex align-items-center gap-2">
+                <img src="~/lib/lucide/upload.svg" width="20" height="20" alt="" />
+                Upload File
+            </a>
+        }
+    </div>
 </div>
 
 @if (Model.StatusMessage is not null)

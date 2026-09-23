@@ -97,21 +97,29 @@ public sealed class EligibilityTests
         var initial = await eligibility.GetAsync([worker, other], default);
         Assert.False(initial[10].IsReady);
         Assert.Equal(2, initial[10].Reasons.Count);
+        Assert.Equal(new[] { new MissingTermsResponse(10, "Safety", 1), new MissingTermsResponse(11, "Conduct", 1) },
+            initial[10].MissingTerms.OrderBy(terms => terms.TermsDocumentId));
         Assert.True(initial[11].IsReady);
+        Assert.Empty(initial[11].MissingTerms);
         Assert.Empty(await database.StaffTermsAssignments.ToListAsync());
 
         database.StaffTermsAcceptances.Add(new() { StaffId = 10, TermsDocumentVersionId = 10 });
         await database.SaveChangesAsync();
-        Assert.False((await eligibility.GetAsync([worker], default))[10].IsReady);
+        var partiallyAccepted = (await eligibility.GetAsync([worker], default))[10];
+        Assert.False(partiallyAccepted.IsReady);
+        Assert.Equal(new MissingTermsResponse(11, "Conduct", 1), Assert.Single(partiallyAccepted.MissingTerms));
         database.StaffTermsAcceptances.Add(new() { StaffId = 10, TermsDocumentVersionId = 11 });
         await database.SaveChangesAsync();
-        Assert.True((await eligibility.GetAsync([worker], default))[10].IsReady);
+        var fullyAccepted = (await eligibility.GetAsync([worker], default))[10];
+        Assert.True(fullyAccepted.IsReady);
+        Assert.Empty(fullyAccepted.MissingTerms);
 
         database.TermsDocumentVersions.Add(new() { Id = 12, TermsDocumentId = 10, Version = 2, Language = "uk", Content = "Updated safety" });
         await database.SaveChangesAsync();
         var outdated = (await eligibility.GetAsync([worker], default))[10];
         Assert.False(outdated.IsReady);
         Assert.Contains("Terms outstanding: Safety, version 2.", outdated.Reasons);
+        Assert.Equal(new MissingTermsResponse(10, "Safety", 2), Assert.Single(outdated.MissingTerms));
         database.StaffTermsAcceptances.Add(new() { StaffId = 11, TermsDocumentVersionId = 12 });
         await database.SaveChangesAsync();
         Assert.False((await eligibility.GetAsync([worker], default))[10].IsReady);
@@ -121,10 +129,14 @@ public sealed class EligibilityTests
 
         database.TermsDocuments.Add(new() { Id = 12, Title = "Unpublished", RequiredByRoles = [new() { StaffRoleId = 1 }] });
         await database.SaveChangesAsync();
-        Assert.False((await eligibility.GetAsync([worker], default))[10].IsReady);
+        var unpublished = (await eligibility.GetAsync([worker], default))[10];
+        Assert.False(unpublished.IsReady);
+        Assert.Equal(new MissingTermsResponse(12, "Unpublished", null), Assert.Single(unpublished.MissingTerms));
         worker.StaffRoleId = 2;
         await database.SaveChangesAsync();
-        Assert.True((await eligibility.GetAsync([worker], default))[10].IsReady);
+        var changedRole = (await eligibility.GetAsync([worker], default))[10];
+        Assert.True(changedRole.IsReady);
+        Assert.Empty(changedRole.MissingTerms);
     }
 
     [Fact]
@@ -143,6 +155,12 @@ public sealed class EligibilityTests
 
         Assert.False(result.IsReady);
         Assert.Contains("Terms outstanding: Safety, version 2.", result.Reasons);
+        Assert.Equal(new MissingTermsResponse(10, "Safety", 2), Assert.Single(result.MissingTerms));
+
+        database.StaffRoleTermsDocuments.Add(new() { StaffRoleId = 1, TermsDocumentId = 10 });
+        await database.SaveChangesAsync();
+        var alsoRequiredByRole = (await new EligibilityService(database, TimeProvider.System).GetAsync([worker], default))[10];
+        Assert.Equal(new MissingTermsResponse(10, "Safety", 2), Assert.Single(alsoRequiredByRole.MissingTerms));
     }
 
     [Fact]

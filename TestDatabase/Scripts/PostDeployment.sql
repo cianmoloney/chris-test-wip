@@ -7,7 +7,7 @@ BEGIN
     SET IDENTITY_INSERT dbo.StaffTypes ON;
     INSERT INTO dbo.StaffTypes (Id, Name, Prefix)
     VALUES (1, N'Permanent', N'P'),
-           (2, N'External', N'E');
+            (2, N'Contract', N'C');
     SET IDENTITY_INSERT dbo.StaffTypes OFF;
 END;
 
@@ -62,6 +62,7 @@ WHERE staff.Role IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.StaffRoles role W
 UPDATE staff SET StaffRoleId = role.Id FROM dbo.Staff staff JOIN dbo.StaffRoles role ON role.Name = staff.Role
 WHERE staff.StaffRoleId IS NULL;
 UPDATE dbo.StaffTypes SET Name = N'Contract' WHERE Name = N'External';
+UPDATE dbo.StaffTypes SET Prefix = N'C' WHERE Name = N'Contract' AND Prefix = N'E';
 
 INSERT INTO dbo.Responsibilities (RoleId, Name, IsEnabled)
 SELECT role.Id, permission.Name, 1

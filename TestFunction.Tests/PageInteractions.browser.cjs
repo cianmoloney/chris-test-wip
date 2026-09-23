@@ -31,6 +31,11 @@ async function verify() {
     let failMappings = false;
     let failUpload = false;
     let failUploadTypes = false;
+    let staffReadiness = {
+        isReady: false,
+        reasons: ['Current validated document required: Safety.', 'Terms outstanding: Safety & Induction, version 2.', 'Required terms have no published version: <Site rules>.'],
+        missingTerms: [{ termsDocumentId: 1, title: 'Safety & Induction', requiredVersion: 2 }, { termsDocumentId: 3, title: '<Site rules>', requiredVersion: null }]
+    };
     const revision = values => createHash('sha256').update(JSON.stringify([...new Set(values)].sort((left, right) => typeof left === 'number' ? left - right : left < right ? -1 : left > right ? 1 : 0))).digest('hex').toUpperCase();
     const backend = http.createServer(async (request, response) => {
         const chunks = [];
@@ -104,6 +109,12 @@ async function verify() {
         if (route === '/terms') return json(terms.map(document => ({ ...document, staffRoleIds: document.staffRoleIds || [], roleRevision: revision(document.staffRoleIds || []) })));
         if (/^\/terms\/\d+\/versions$/.test(route)) return json(failTerms ? {} : versions(Number(route.split('/')[2])), failTerms ? 500 : 200);
         if (route === '/staff') return json({ staff: staff.filter(worker => !url.searchParams.get('filter') || worker.firstName.includes(url.searchParams.get('filter'))), lastTermsAcceptedAt: {}, readiness: {} });
+        if (route === '/staff/1') return json({
+            staff: staff[0], documents: documents.filter(document => document.staffId === 1),
+            agreements: [{ id: 1, termsDocumentVersion: versions(1)[1], acceptedAt: '2026-08-02T00:00:00Z' }],
+            staffRoles: roles, staffTypes: [staff[0].staffType], documentTypes: types,
+            missingDocumentTypes: staffReadiness.isReady ? [] : [types[1]], readiness: staffReadiness
+        });
         if (route === '/documents') return json({ documents, staff, documentTypes: types });
         if (route === '/users') return json({ users: [account, { id: 2, email: 'hr@example.invalid', roleId: 2, role: 'HR', isEnabled: false, mfaEnabled: true, permissions: ['Staff.Read'] }], roles: officeRoles });
         if (route === '/public/resolve') return json({ purpose: 'register-many', lookups: { staffRoles: roles, staffTypes: [{ id: 1, name: 'Permanent' }], documentTypes: types, roleRequiredDocuments: { 1: ['Induction'], 2: ['Safety'] } } });
@@ -167,12 +178,15 @@ async function verify() {
         await page.locator('#password').fill('fixture-password-only');
         await Promise.all([page.waitForURL(baseUrl + '/'), page.getByRole('button', { name: 'Sign in', exact: true }).click()]);
 
-        const menuLabels = ['Uploaded Files', 'Staff', 'Document Explorer', 'Generate Link', 'Terms', 'Accounts', 'Access Editor'];
-        const menuRoutes = ['/Files', '/Staff', '/Documents', '/GenerateLink', '/ManageTerms', '/Users', '/Roles'];
+        const menuLabels = ['Manage Staff', 'Document Explorer', 'Generate Link', 'Manage Terms', 'Accounts', 'Access Editor'];
+        const menuRoutes = ['/Staff', '/Documents', '/GenerateLink', '/ManageTerms', '/Users', '/Roles'];
         const navigation = page.getByRole('navigation', { name: 'Main navigation' });
         const primaryLinks = navigation.locator('.navbar-nav a');
         assert.deepEqual(await primaryLinks.allTextContents(), menuLabels);
         assert.deepEqual(await primaryLinks.evaluateAll(links => links.map(link => link.getAttribute('href'))), menuRoutes);
+        const footer = page.getByRole('contentinfo');
+        assert.match(await footer.innerText(), /Built by MSTMC/);
+        assert.equal(await footer.getByRole('link', { name: 'MSTMC', exact: true }).getAttribute('href'), 'mailto:moloneysheehanltd@gmail.com');
         assert.equal(await navigation.getByRole('link', { name: 'TestFrontend', exact: true }).getAttribute('href'), '/');
         const accountLink = navigation.getByRole('link', { name: 'My account', exact: true });
         assert.equal(await accountLink.getAttribute('href'), '/Account');
@@ -237,8 +251,11 @@ async function verify() {
         account.role = 'Foreman';
         account.permissions = ['Staff.Read', 'Links.Write'];
         await open('/Staff');
-        assert.deepEqual(await primaryLinks.allTextContents(), menuLabels.slice(0, 4));
+        assert.deepEqual(await primaryLinks.allTextContents(), menuLabels.slice(0, 3));
         assert.equal(await page.getByRole('link', { name: 'Staff Roles & Document Types', exact: true }).count(), 0);
+        await open('/Documents');
+        assert.equal(await page.locator('main').getByRole('link', { name: 'Uploaded Files', exact: true }).isVisible(), true);
+        assert.equal(await page.getByRole('link', { name: 'Upload File', exact: true }).count(), 0);
         account.role = 'Admin';
         account.permissions = [];
         await open('/');
@@ -255,7 +272,7 @@ async function verify() {
         await page.locator('#password').fill('fixture-password-only');
         await Promise.all([page.waitForURL(baseUrl + '/'), page.getByRole('button', { name: 'Sign in', exact: true }).click()]);
 
-        const actionNames = ['Staff Links', 'Document Explorer', 'Staff Viewer', 'Upload File'];
+        const actionNames = ['Generate Link for Staff', 'Document Explorer', 'Manage Staff', 'Upload File'];
         const actionRoutes = ['/GenerateLink', '/Documents', '/Staff', '/UploadFile'];
         for (const width of [1440, 768, 390, 320]) {
             await page.setViewportSize({ width, height: 900 });
@@ -273,12 +290,33 @@ async function verify() {
             })));
             assert(tileStyles.every(tile => tile.height >= 136 && tile.background === 'rgb(18, 97, 181)' && tile.iconLoaded && tile.iconWhite && tile.textFits));
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Quick Actions overflow at ${width}px`);
+            const footerBounds = await footer.boundingBox();
+            const mainBounds = await page.locator('main').boundingBox();
+            assert(footerBounds.y >= mainBounds.y + mainBounds.height - 1, `Footer overlaps content at ${width}px`);
             if (process.env.BROWSER_TEST_ARTIFACTS && [1440, 390].includes(width))
                 await page.screenshot({ path: path.join(process.env.BROWSER_TEST_ARTIFACTS, `quick-actions-${width}.png`), fullPage: true });
         }
         await page.setViewportSize({ width: 1440, height: 1000 });
         await open('/');
         await Promise.all([page.waitForURL(baseUrl + '/Documents'), page.locator('main').getByRole('link', { name: 'Document Explorer', exact: true }).click()]);
+        const uploadedFiles = page.locator('main').getByRole('link', { name: 'Uploaded Files', exact: true });
+        assert.equal(await uploadedFiles.getAttribute('href'), '/Files');
+        assert.equal(await uploadedFiles.locator('img').evaluate(image => image.complete && image.naturalWidth > 0), true);
+        for (const width of [1440, 390, 320]) {
+            await page.setViewportSize({ width, height: 900 });
+            assert.equal(await uploadedFiles.isVisible(), true);
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Document Explorer overflow at ${width}px`);
+            const filesBounds = await uploadedFiles.boundingBox();
+            const uploadBounds = await page.getByRole('link', { name: 'Upload File', exact: true }).boundingBox();
+            assert(filesBounds.x + filesBounds.width <= uploadBounds.x + 1 || filesBounds.y + filesBounds.height <= uploadBounds.y + 1,
+                `Document Explorer buttons overlap at ${width}px`);
+            if (process.env.BROWSER_TEST_ARTIFACTS && [1440, 390].includes(width))
+                await page.screenshot({ path: path.join(process.env.BROWSER_TEST_ARTIFACTS, `document-explorer-${width}.png`), fullPage: true });
+        }
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await Promise.all([page.waitForURL(baseUrl + '/Files'), uploadedFiles.click()]);
+        await page.getByRole('heading', { name: 'Uploaded Files', exact: true }).waitFor();
+        await open('/Documents');
         await Promise.all([page.waitForURL(baseUrl + '/UploadFile'), page.getByRole('link', { name: 'Upload File', exact: true }).click()]);
         await page.getByRole('heading', { name: 'Upload File', exact: true }).waitFor();
         assert(await page.locator('.upload-icon').evaluate(icon => getComputedStyle(icon).filter.includes('invert(1)')));
@@ -363,6 +401,56 @@ async function verify() {
         assert.deepEqual(errors, []);
         console.log('PASS: Quick Actions layout/links/icons; typed and automatic uploads, validation, errors, permissions, PRG and mobile form.');
         if (process.env.BROWSER_TEST_SUITE === 'quick-actions') return;
+
+        for (const width of [1440, 390, 320]) {
+            await page.setViewportSize({ width, height: 900 });
+            await open('/StaffMember/1');
+            const status = page.getByRole('status', { name: 'Not Ready', exact: true });
+            assert.equal(await status.isVisible(), true);
+            assert.equal(await status.locator('li').count(), 3);
+            assert.equal(await status.evaluate(element => element.classList.contains('alert-danger') && getComputedStyle(element).borderLeftWidth === '4px'), true);
+            const statusBounds = await status.boundingBox();
+            const detailsBounds = await page.getByRole('heading', { name: 'Details', exact: true }).boundingBox();
+            assert(statusBounds.y + statusBounds.height <= detailsBounds.y, 'Work status must be above Details');
+            const summary = page.locator('#missing-terms-summary');
+            assert.deepEqual(await summary.locator('li').allTextContents(), ['Safety & Induction (version 2)', '<Site rules> (no published version)']);
+            assert.equal(await summary.evaluate(element => element.previousElementSibling.textContent.trim()), 'Agreements');
+            assert.equal(await summary.locator('site, script').count(), 0, 'Terms titles must be escaped');
+            assert.equal(await page.getByRole('cell', { name: 'Superseded', exact: true }).count(), 1, 'Keep earlier acceptance history');
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Staff Member overflow at ${width}px`);
+            if (process.env.BROWSER_TEST_ARTIFACTS && [1440, 390].includes(width))
+                await page.screenshot({ path: path.join(process.env.BROWSER_TEST_ARTIFACTS, `staff-member-missing-${width}.png`), fullPage: true });
+        }
+        account.role = 'Foreman';
+        account.permissions = ['Staff.Read'];
+        await open('/StaffMember/1');
+        assert.equal(await page.locator('#missing-terms-summary').isVisible(), true);
+        assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), true);
+        staffReadiness = { isReady: true, reasons: [], missingTerms: [] };
+        for (const width of [1440, 320]) {
+            await page.setViewportSize({ width, height: 900 });
+            await open('/StaffMember/1');
+            const ready = page.getByRole('status', { name: 'Ready for work', exact: true });
+            assert.equal(await ready.isVisible(), true);
+            assert.equal(await ready.evaluate(element => element.classList.contains('alert-success') && getComputedStyle(element).borderLeftWidth === '4px'), true);
+            assert.equal(await page.locator('#missing-terms-summary').count(), 0);
+            assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Ready Staff Member overflow at ${width}px`);
+            if (process.env.BROWSER_TEST_ARTIFACTS)
+                await page.screenshot({ path: path.join(process.env.BROWSER_TEST_ARTIFACTS, `staff-member-ready-${width}.png`), fullPage: true });
+        }
+        staffReadiness = { isReady: false, reasons: ['Current validated document required: Safety.'], missingTerms: [] };
+        await open('/StaffMember/1');
+        assert.equal(await page.getByRole('status', { name: 'Not Ready', exact: true }).isVisible(), true);
+        assert.equal(await page.locator('#missing-terms-summary').count(), 0, 'Missing documents must not appear as missing terms');
+        account.permissions = [];
+        await open('/StaffMember/1');
+        assert.equal(await page.locator('#work-status').count(), 0, 'Staff.Read remains required');
+        account.role = 'Admin';
+        account.permissions = permissions;
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        assert.deepEqual(errors, []);
+        console.log('PASS: Staff Member readiness banners, missing terms/editions, acceptance history, read-only access and mobile layouts.');
+        if (process.env.BROWSER_TEST_SUITE === 'staff-member') return;
 
         await open('/ManageTerms?DocumentId=1');
         assert.equal(await page.locator('[name="RoleInput.StaffRoleIds"]:checked').count(), 0);

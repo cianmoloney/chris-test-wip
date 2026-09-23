@@ -25,10 +25,7 @@
                             @if (User.HasClaim("permission", TestShared.Permissions.StaffRead))
                             {
                             <li class="nav-item">
-                                <a class="nav-link text-dark" asp-area="" asp-page="/Files">Uploaded Files</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link text-dark" asp-area="" asp-page="/Staff">Staff</a>
+                                <a class="nav-link text-dark" asp-area="" asp-page="/Staff">Manage Staff</a>
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link text-dark" asp-area="" asp-page="/Documents">Document Explorer</a>
@@ -41,7 +38,7 @@
                             </li>
                             }
                             @if (User.HasClaim("permission", TestShared.Permissions.TermsWrite))
-                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/ManageTerms">Terms</a></li> }
+                            { <li class="nav-item"><a class="nav-link text-dark" asp-page="/ManageTerms">Manage Terms</a></li> }
                             @if (User.HasClaim("permission", TestShared.Permissions.UsersWrite))
                             { <li class="nav-item"><a class="nav-link text-dark" asp-page="/Users">Accounts</a></li> }
                             @if (User.IsInRole("Admin"))
@@ -68,7 +65,7 @@
 
     <footer class="border-top footer text-muted">
         <div class="container">
-            &copy; 2026 - TestFrontend
+            &copy; 2026 - TestFrontend - Built by <a href="mailto:moloneysheehanltd@gmail.com">MSTMC</a>
         </div>
     </footer>
 

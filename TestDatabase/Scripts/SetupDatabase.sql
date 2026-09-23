@@ -257,7 +257,7 @@ BEGIN TRY
 
     SET IDENTITY_INSERT [dbo].[StaffTypes] ON;
     INSERT INTO [dbo].[StaffTypes] ([Id], [Name], [Prefix])
-    VALUES (1, N'Permanent', N'P'), (2, N'Contract', N'E');
+    VALUES (1, N'Permanent', N'P'), (2, N'Contract', N'C');
     SET IDENTITY_INSERT [dbo].[StaffTypes] OFF;
 
     SET IDENTITY_INSERT [dbo].[Roles] ON;

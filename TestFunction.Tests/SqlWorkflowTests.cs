@@ -30,6 +30,36 @@ public sealed class SqlWorkflowTests
     private static LinkService Links(AppDbContext database) => new(database, new StaffDataService(database), TimeProvider.System);
 
     [SqlFact]
+    public async Task ContractorStaffIdsUseCOnCreationAndTypeChange()
+    {
+        await using var database = Database();
+        var staffData = new StaffDataService(database);
+        var contractor = await staffData.CreateStaffAsync(new()
+        {
+            FirstName = "Contractor", LastName = "Prefix", Email = $"{Guid.NewGuid():N}@example.test", StaffTypeId = 2, StaffRoleId = 1
+        }, default);
+        var permanent = await staffData.CreateStaffAsync(new()
+        {
+            FirstName = "Permanent", LastName = "Prefix", Email = $"{Guid.NewGuid():N}@example.test", StaffTypeId = 1, StaffRoleId = 1
+        }, default);
+
+        Assert.Equal($"C{contractor.StaffNumber}", contractor.StaffId);
+        Assert.Equal($"P{permanent.StaffNumber}", permanent.StaffId);
+        Assert.Equal(contractor.StaffId, (await database.Staff.AsNoTracking().SingleAsync(staff => staff.Id == contractor.Id)).StaffId);
+        Assert.Equal(permanent.StaffId, (await database.Staff.AsNoTracking().SingleAsync(staff => staff.Id == permanent.Id)).StaffId);
+
+        await staffData.UpdateStaffAsync(permanent.Id, new()
+        {
+            FirstName = permanent.FirstName, LastName = permanent.LastName, Email = permanent.Email,
+            StaffTypeId = 2, StaffRoleId = 1
+        }, default);
+
+        var updated = await database.Staff.AsNoTracking().SingleAsync(staff => staff.Id == permanent.Id);
+        Assert.Equal(permanent.StaffNumber, updated.StaffNumber);
+        Assert.Equal($"C{permanent.StaffNumber}", updated.StaffId);
+    }
+
+    [SqlFact]
     public async Task SharedTermsHaveOneHistoryAndRequireLatestAcceptanceInEveryRole()
     {
         await using var database = Database();

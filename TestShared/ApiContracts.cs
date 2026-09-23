@@ -64,7 +64,12 @@ public sealed record StaffListResponse(
     Dictionary<int, ReadinessResponse>? Readiness = null);
 
 /// <summary>Current work eligibility and the requirements preventing it.</summary>
-public sealed record ReadinessResponse(bool IsReady, List<string> Reasons);
+public sealed record ReadinessResponse(bool IsReady, List<string> Reasons)
+{
+    public List<MissingTermsResponse> MissingTerms { get; init; } = [];
+}
+
+public sealed record MissingTermsResponse(int TermsDocumentId, string Title, int? RequiredVersion);
 
 public enum DocumentStatus
 {

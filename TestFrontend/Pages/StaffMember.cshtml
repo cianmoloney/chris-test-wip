@@ -18,14 +18,27 @@
     <div class="alert alert-warning">@Model.StatusMessage</div>
 }
 
+@if (Model.Readiness is { } readiness)
+{
+    <div id="work-status" class="alert @(readiness.IsReady ? "alert-success border-success" : "alert-danger border-danger") border-start border-4"
+         role="status" aria-labelledby="work-status-title">
+        <div class="small fw-bold text-uppercase mb-1">Work status</div>
+        <h2 id="work-status-title" class="h4 fw-bold mb-0">@(readiness.IsReady ? "Ready for work" : "Not Ready")</h2>
+        @if (readiness.Reasons.Count > 0)
+        {
+            <ul class="mb-0 mt-2">
+                @foreach (var reason in readiness.Reasons)
+                {
+                    <li>@reason</li>
+                }
+            </ul>
+        }
+    </div>
+}
+
 <a asp-page="/Staff" class="btn btn-outline-secondary mb-3">Back to staff</a>
 
 <h2>Details</h2>
-@if (Model.Readiness is { } readiness)
-{
-    <p class="fw-bold">@(readiness.IsReady ? "Ready for work" : "Not ready for work")</p>
-    @foreach (var reason in readiness.Reasons) { <p class="text-danger">@reason</p> }
-}
 
 <form method="post" class="col-md-6 mb-4">
     <fieldset disabled="@(!User.HasClaim("permission", Permissions.StaffWrite))">
@@ -188,6 +201,19 @@ else
 }
 
 <h2>Agreements</h2>
+
+@if (Model.Readiness?.MissingTerms is { Count: > 0 } missingTerms)
+{
+    <div id="missing-terms-summary" class="alert alert-warning">
+        <strong>Missing required terms:</strong>
+        <ul class="mb-0 mt-2">
+            @foreach (var terms in missingTerms)
+            {
+                <li>@terms.Title (@(terms.RequiredVersion is { } version ? $"version {version}" : "no published version"))</li>
+            }
+        </ul>
+    </div>
+}
 
 @if (Model.Agreements.Count == 0)
 {

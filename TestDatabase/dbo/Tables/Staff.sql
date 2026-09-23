@@ -1,5 +1,5 @@
 -- Staff registered via the registration page. StaffId is a human-readable
--- identifier prefixed by the Staff type ("P" for permanent, "E" for external),
+-- identifier prefixed by the Staff type ("P" for permanent, "C" for contractor),
 -- distinct from the surrogate Id used for SQL joins.
 CREATE TABLE [dbo].[Staff]
 (
