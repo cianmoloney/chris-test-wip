@@ -22,7 +22,7 @@
         <div class="row g-3 mb-4">
             <form method="get" class="col-md-6" data-auto-submit>
                 <label asp-for="DocumentId" class="form-label">Terms document</label>
-                <div class="d-flex gap-2">
+                <div class="d-flex gap-2 flex-wrap">
                     <select asp-for="DocumentId" class="form-select">
                         @foreach (var terms in Model.Terms)
                         { <option value="@terms.Id">@terms.Title</option> }
@@ -35,7 +35,7 @@
                 <form method="get" class="col-md-6" data-terms-selector>
                     <input type="hidden" name="DocumentId" value="@Model.DocumentId" />
                     <label asp-for="VersionId" class="form-label">Version and language</label>
-                    <div class="d-flex gap-2">
+                    <div class="d-flex gap-2 flex-wrap">
                         <select asp-for="VersionId" class="form-select">
                             @foreach (var version in Model.Versions)
                             {

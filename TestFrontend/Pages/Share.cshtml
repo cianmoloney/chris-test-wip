@@ -22,13 +22,13 @@ else
         <div class="alert alert-info">@Text["Failure"]</div>
     }
 
-    <form method="post" enctype="multipart/form-data" class="mb-3 d-flex gap-2 flex-wrap"
+    <form method="post" enctype="multipart/form-data" class="responsive-toolbar mb-3 d-flex gap-2 flex-wrap"
           asp-page="/Share" asp-page-handler="Upload" asp-route-token="@Model.Token" asp-route-lang="@Request.Query["lang"]">
         <select asp-for="DocumentTypeId" class="form-select w-auto" aria-label="Document type">
             <option value="">@Text["DocumentType"]</option>
             @foreach (var type in Model.DocumentTypes) { <option value="@type.Id">@type.Name</option> }
         </select>
-        <input type="file" name="upload" class="form-control w-auto" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp" required />
+        <input type="file" name="upload" class="form-control w-auto" aria-label="@Text["UploadTitle"]" accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp" required />
         <button type="submit" class="btn btn-primary">@Text["Upload"]</button>
     </form>
 }

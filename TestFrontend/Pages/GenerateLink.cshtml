@@ -12,29 +12,43 @@
     <div class="alert alert-danger">@Model.ErrorMessage</div>
 }
 
-<form method="post" class="mb-3 d-flex gap-2 align-items-center flex-wrap">
-    <select asp-for="LinkType" class="form-select w-auto" aria-label="Link type">
+<form method="post" class="mb-3 row g-3 align-items-end">
+    <div class="col-md-6">
+    <label asp-for="LinkType" class="form-label">Link type</label>
+    <select asp-for="LinkType" class="form-select">
         <option value="register">Registration link</option>
         <option value="register-many">Multiple registration link</option>
         <option value="upload">File upload link</option>
         <option value="terms">Terms acceptance link</option>
     </select>
-    <select asp-for="StaffId" class="form-select w-auto" aria-label="Staff member" disabled="@(Model.LinkType is TestShared.ShareLinkPurposes.Register or TestShared.ShareLinkPurposes.RegisterMultiple)">
+    </div>
+    <div class="col-md-6">
+    <label asp-for="StaffId" class="form-label">Staff member</label>
+    <select asp-for="StaffId" class="form-select" disabled="@(Model.LinkType is TestShared.ShareLinkPurposes.Register or TestShared.ShareLinkPurposes.RegisterMultiple)">
         <option value="">No staff member (generic link)</option>
         @foreach (var staff in Model.StaffList)
         {
             <option value="@staff.Id">@staff.LastName, @staff.FirstName (@staff.Email)</option>
         }
     </select>
-    <div class="input-group w-auto">
-        <select asp-for="TermsDocumentId" class="form-select" aria-label="Terms document" disabled="@(Model.LinkType != TestShared.ShareLinkPurposes.Terms)">
+    </div>
+    <div class="col-md-6">
+        <label asp-for="TermsDocumentId" class="form-label">Terms document</label>
+        <select asp-for="TermsDocumentId" class="form-select" disabled="@(Model.LinkType != TestShared.ShareLinkPurposes.Terms)">
             <option value="">Select terms</option>
             @foreach (var terms in Model.TermsDocuments) { <option value="@terms.Id">@terms.Title</option> }
         </select>
-        <input type="number" asp-for="ValidHours" class="form-control" min="1" max="336" style="max-width: 6rem" />
-        <span class="input-group-text">hours</span>
     </div>
+    <div class="col-md-6">
+        <label asp-for="ValidHours" class="form-label">Valid for</label>
+        <div class="input-group link-duration">
+            <input type="number" asp-for="ValidHours" class="form-control" min="1" max="336" aria-describedby="duration-unit" />
+            <span class="input-group-text" id="duration-unit">hours</span>
+        </div>
+    </div>
+    <div class="col-12">
     <button type="submit" class="btn btn-primary">Generate secure link</button>
+    </div>
 </form>
 
 @if (Model.ShareLink is not null)

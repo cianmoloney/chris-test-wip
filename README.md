@@ -238,6 +238,46 @@ no-JavaScript fallbacks, mobile widths and revoked sessions. Live Azure Storage
 latency is not measured. SQL concurrency tests require `HR_TEST_SQL` pointing
 to a published disposable database named `HrImplementationVerification_*`.
 
+### Desktop and Phone Layout Checks
+
+The same Razor pages serve desktop and phone browsers. Forms stack on narrow
+screens, text inputs remain at least 16px, and standalone phone controls have
+44px touch targets. Staff, files, accounts and staff history retain all columns
+in labelled, keyboard-focusable horizontal scroll regions. Staff document
+editors open below the table at the available page width. No columns are hidden
+and authentication, permissions, form handlers and draft protection are unchanged.
+
+After the browser-test prerequisites above, run the all-page responsive suite:
+
+```powershell
+dotnet build TestFrontend/TestFrontend.csproj -c PageInteractionsVerification
+$env:FRONTEND_TEST_CONFIGURATION = "PageInteractionsVerification"
+$env:BROWSER_TEST_SUITE = "mobile"
+$env:BROWSER_TEST_ARTIFACTS = Join-Path $env:TEMP "hr-responsive-screenshots"
+node TestFunction.Tests/PageInteractions.browser.cjs
+Remove-Item Env:BROWSER_TEST_SUITE
+node TestFunction.Tests/PageInteractions.browser.cjs
+```
+
+The responsive suite checks all 22 routes, office editor modes, long synthetic
+names/filenames/identifiers, English/Polish/Ukrainian worker pages, 320-1440px
+viewports, landscape, tablet, touch actions, keyboard table scrolling, 200%
+text sizing, footer placement and no-JavaScript layouts. It also exercises
+document editing, generated links/revocation, terms acceptance, upload errors
+and success, registration validation, empty lists and login/MFA. Screenshots
+are optional; omit `BROWSER_TEST_ARTIFACTS` to disable them. Narrower development
+checks are available as `mobile-shell`, `mobile-tables` and `mobile-forms`.
+Run the default suite as well to cover permission gates, concurrency revisions,
+unsaved drafts, native history and translated multiple-registration behavior.
+
+Edge passed both suites during this change, along with 86 focused page-model
+tests. WebKit can be selected with `BROWSER_TEST_ENGINE=webkit` after installing
+it using `node "$env:PLAYWRIGHT_MODULE/cli.js" install webkit`; this workstation's
+WebKit run failed to connect to the local HTTPS fixture before loading a page.
+Safari/WebKit is therefore not verified. Remove `BROWSER_TEST_ENGINE` to return
+to Edge. Physical iPhone/Android keyboard, native picker and swipe behavior
+still require device checks; desktop mobile emulation is not equivalent.
+
 ## Workflow Rules
 
 - The header shows Manage Staff, Document Explorer, Generate Link,

@@ -4,7 +4,7 @@
     ViewData["Title"] = "Staff";
 }
 
-<h1>Staff</h1>
+<h1 id="staff-heading">Staff</h1>
 @if (User.HasClaim("permission", TestShared.Permissions.StaffWrite) || User.HasClaim("permission", TestShared.Permissions.DocumentsWrite))
 {
     <div class="d-flex flex-wrap gap-2 mb-3">
@@ -20,9 +20,9 @@
     <div class="alert alert-warning">@Model.StatusMessage</div>
 }
 
-<form method="get" class="mb-3 d-flex gap-2 flex-wrap">
-    <input type="text" asp-for="Filter" class="form-control w-auto" placeholder="Filter by name, email or role" />
-    <select asp-for="SortBy" class="form-select w-auto">
+<form method="get" class="responsive-toolbar mb-3 d-flex gap-2 flex-wrap">
+    <input type="text" asp-for="Filter" class="form-control w-auto" placeholder="Filter by name, email or role" aria-label="Staff filter" />
+    <select asp-for="SortBy" class="form-select w-auto" aria-label="Staff sort">
         <option value="">Sort by name</option>
         <option value="email">Sort by email</option>
         <option value="role">Sort by role</option>
@@ -41,18 +41,19 @@
 }
 else
 {
+    <div class="table-scroll" role="region" aria-labelledby="staff-heading" tabindex="0">
     <table class="table table-hover">
         <thead>
             <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Role</th>
-                <th>Type</th>
-                <th>Ready for work</th>
-                <th>Registered</th>
-                <th>Actions</th>
+                <th scope="col">ID</th>
+                <th scope="col">Name</th>
+                <th scope="col">Email</th>
+                <th scope="col">Phone</th>
+                <th scope="col">Role</th>
+                <th scope="col">Type</th>
+                <th scope="col">Ready for work</th>
+                <th scope="col">Registered</th>
+                <th scope="col">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -60,11 +61,11 @@ else
             {
                 <tr>
                     <td>@(staff.StaffId ?? "—")</td>
-                    <td><a asp-page="/StaffMember" asp-route-id="@staff.Id">@staff.FirstName @staff.LastName</a></td>
-                    <td>@staff.Email</td>
+                    <td class="cell-text"><a asp-page="/StaffMember" asp-route-id="@staff.Id">@staff.FirstName @staff.LastName</a></td>
+                    <td class="cell-text">@staff.Email</td>
                     <td>@staff.PhoneNumber</td>
-                    <td>@(staff.StaffRole?.Name ?? "—")</td>
-                    <td>@(staff.StaffType?.Name ?? "—")</td>
+                    <td class="cell-text">@(staff.StaffRole?.Name ?? "—")</td>
+                    <td class="cell-text">@(staff.StaffType?.Name ?? "—")</td>
                     <td>
                         @if (Model.Readiness.TryGetValue(staff.Id, out var readiness) && readiness.IsReady)
                         {
@@ -88,4 +89,5 @@ else
             }
         </tbody>
     </table>
+    </div>
 }

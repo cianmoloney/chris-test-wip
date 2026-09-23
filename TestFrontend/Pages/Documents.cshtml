@@ -27,10 +27,10 @@
     <div class="alert alert-warning">@Model.StatusMessage</div>
 }
 
-<form method="get" class="mb-3 d-flex gap-2 flex-wrap">
+<form method="get" class="responsive-toolbar mb-3 d-flex gap-2 flex-wrap">
     <input asp-for="Filter" class="form-control w-auto" placeholder="Name, staff, type or number" aria-label="Document filter" />
     <select asp-for="SortBy" class="form-select w-auto" aria-label="Document sort"><option value="">Newest first</option><option value="name">Name</option><option value="expiry">Expiry</option><option value="staff">Staff</option></select>
-    <select asp-for="StatusFilter" class="form-select w-auto">
+    <select asp-for="StatusFilter" class="form-select w-auto" aria-label="Document status">
         <option value="">All statuses</option>
         <option value="pending">Pending review</option>
         <option value="failed">Parse failed</option>
@@ -52,7 +52,7 @@ else
     {
         <div class="card mb-3">
             <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start">
+                <div class="document-heading">
                     <h5 class="card-title mb-2">
                         @(string.IsNullOrEmpty(doc.Name) ? "(unparsed)" : doc.Name)
                         <span class="badge @(doc.Status switch { DocumentStatus.Validated => "bg-success", DocumentStatus.Rejected => "bg-danger", DocumentStatus.ParseFailed => "bg-danger", _ => "bg-warning text-dark" })">
@@ -115,17 +115,17 @@ else
                     }
                 </form>
 
-                <form method="post" asp-page-handler="Update" asp-route-statusFilter="@Model.StatusFilter" class="row g-2 align-items-end mb-2">
-                    <fieldset class="row g-2" disabled="@(!User.HasClaim("permission", Permissions.DocumentsWrite))">
+                <form method="post" asp-page-handler="Update" asp-route-statusFilter="@Model.StatusFilter" class="mb-3">
+                    <fieldset class="row g-3" disabled="@(!User.HasClaim("permission", Permissions.DocumentsWrite))">
                     <input type="hidden" name="id" value="@doc.Id" />
                     <input type="hidden" name="staffId" value="@doc.StaffId" />
-                    <div class="col-md-2">
-                        <label class="form-label">Name</label>
-                        <input type="text" name="name" class="form-control" value="@doc.Name" />
+                    <div class="col-md-6 col-xl-4">
+                        <label for="name-@doc.Id" class="form-label">Name</label>
+                        <input id="name-@doc.Id" type="text" name="name" class="form-control" value="@doc.Name" />
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Type</label>
-                        <select name="documentTypeId" class="form-select">
+                    <div class="col-md-6 col-xl-4">
+                        <label for="type-@doc.Id" class="form-label">Type</label>
+                        <select id="type-@doc.Id" name="documentTypeId" class="form-select">
                             <option value="">— Select type —</option>
                             @foreach (var type in Model.DocumentTypesList)
                             {
@@ -133,25 +133,25 @@ else
                             }
                         </select>
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Number</label>
-                        <input type="text" name="documentNumber" class="form-control" value="@doc.DocumentNumber" />
+                    <div class="col-md-6 col-xl-4">
+                        <label for="number-@doc.Id" class="form-label">Number</label>
+                        <input id="number-@doc.Id" type="text" name="documentNumber" class="form-control" value="@doc.DocumentNumber" />
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Email</label>
-                        <input type="text" name="email" class="form-control" value="@doc.Email" />
+                    <div class="col-md-6 col-xl-4">
+                        <label for="email-@doc.Id" class="form-label">Email</label>
+                        <input id="email-@doc.Id" type="text" name="email" class="form-control" value="@doc.Email" />
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Phone</label>
-                        <input type="text" name="phone" class="form-control" value="@doc.Phone" />
+                    <div class="col-md-6 col-xl-4">
+                        <label for="phone-@doc.Id" class="form-label">Phone</label>
+                        <input id="phone-@doc.Id" type="text" name="phone" class="form-control" value="@doc.Phone" />
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Start</label>
-                        <input type="date" name="startDate" class="form-control" value="@doc.StartDate?.ToString("yyyy-MM-dd")" />
+                    <div class="col-md-6 col-xl-4">
+                        <label for="start-@doc.Id" class="form-label">Start</label>
+                        <input id="start-@doc.Id" type="date" name="startDate" class="form-control" value="@doc.StartDate?.ToString("yyyy-MM-dd")" />
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label">Expiry</label>
-                        <input type="date" name="expiryDate" class="form-control" value="@doc.ExpiryDate?.ToString("yyyy-MM-dd")" />
+                    <div class="col-md-6 col-xl-4">
+                        <label for="expiry-@doc.Id" class="form-label">Expiry</label>
+                        <input id="expiry-@doc.Id" type="date" name="expiryDate" class="form-control" value="@doc.ExpiryDate?.ToString("yyyy-MM-dd")" />
                     </div>
                     <div class="col-12">
                         <button type="submit" class="btn btn-sm btn-outline-primary">Save changes</button>

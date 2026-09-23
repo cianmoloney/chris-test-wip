@@ -14,8 +14,8 @@
 }
 else
 {
-    <form method="get" class="d-flex gap-2 flex-wrap align-items-end mb-4" data-role-selector>
-        <div>
+    <form method="get" class="responsive-toolbar d-flex gap-2 flex-wrap align-items-end mb-4" data-role-selector>
+        <div class="flexible-field">
             <label for="role-choice" class="form-label">Role</label>
             <select id="role-choice" name="Id" class="form-select">
                 @foreach (var role in Model.Data.Roles)

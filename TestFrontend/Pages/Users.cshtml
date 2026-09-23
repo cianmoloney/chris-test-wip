@@ -1,12 +1,12 @@
 @page
 @model TestFrontend.Pages.UsersModel
 @{ ViewData["Title"] = "Accounts"; }
-<h1>Accounts</h1>
-<div class="table-responsive">
-<table class="table"><thead><tr><th>Email</th><th>Role</th><th>Enabled</th><th>MFA</th><th></th></tr></thead><tbody>
+<h1 id="users-heading">Accounts</h1>
+<div class="table-scroll" role="region" aria-labelledby="users-heading" tabindex="0">
+<table class="table"><thead><tr><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Enabled</th><th scope="col">MFA</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead><tbody>
 @foreach (var user in Model.Data.Users)
 {
-    <tr><td>@user.Email</td><td>@user.Role</td><td>@user.IsEnabled</td><td>@user.MfaEnabled</td><td><a asp-route-id="@user.Id" data-user="@System.Text.Json.JsonSerializer.Serialize(new { user.Id, user.Email, user.RoleId, user.IsEnabled, user.MfaEnabled })">Edit</a></td></tr>
+    <tr><td class="cell-text">@user.Email</td><td>@user.Role</td><td>@user.IsEnabled</td><td>@user.MfaEnabled</td><td><a class="touch-link" asp-route-id="@user.Id" data-user="@System.Text.Json.JsonSerializer.Serialize(new { user.Id, user.Email, user.RoleId, user.IsEnabled, user.MfaEnabled })">Edit</a></td></tr>
 }
 </tbody></table></div>
 <h2 data-user-heading>@(Model.Id is null ? "Add user" : "Edit user")</h2>
@@ -19,6 +19,9 @@
     @foreach (var role in Model.Data.Roles.Where(role => role.Name != "Admin" || User.IsInRole("Admin")))
     { <option value="@role.Id">@role.Name</option> }
     </select></div>
-    <div class="col-md-6"><label><input asp-for="Input.IsEnabled" /> Enabled</label> <label><input asp-for="Input.MfaEnabled" /> Email MFA</label></div>
+    <div class="col-md-6">
+        <div class="form-check"><input asp-for="Input.IsEnabled" class="form-check-input" /><label asp-for="Input.IsEnabled" class="form-check-label">Enabled</label></div>
+        <div class="form-check"><input asp-for="Input.MfaEnabled" class="form-check-input" /><label asp-for="Input.MfaEnabled" class="form-check-label">Email MFA</label></div>
+    </div>
     <div><button class="btn btn-primary" type="submit">Save</button> <a asp-page="/Users" asp-route-id="" class="btn btn-secondary" data-user="{}">New user</a></div>
 </form>

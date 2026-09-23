@@ -10,10 +10,10 @@
 
 @if (Model.Mode == "requirements")
 {
-    <div class="d-flex gap-3 flex-wrap align-items-end mb-4">
+    <div class="responsive-toolbar d-flex gap-3 flex-wrap align-items-end mb-4">
         @if (Model.Data.StaffRoles.Count > 0)
         {
-            <form method="get" data-role-selector>
+            <form method="get" class="flexible-field" data-role-selector>
                 <label asp-for="RoleId" class="form-label">Staff role</label>
                 <select asp-for="RoleId" class="form-select">
                     @foreach (var role in Model.Data.StaffRoles)
@@ -41,7 +41,7 @@
                             <label for="type-@type.Id" class="form-check-label">@type.Name</label>
                             <div class="small text-muted">Text identifier: @(string.IsNullOrWhiteSpace(type.TextIdentifier) ? "Not configured" : type.TextIdentifier)</div>
                         </div>
-                        <a asp-page="/DocumentTypes" asp-route-mode="type" asp-route-id="@type.Id" asp-route-roleId="@selected.Id" aria-label="Edit @type.Name" data-role-target>Edit</a>
+                        <a class="touch-link flex-shrink-0" asp-page="/DocumentTypes" asp-route-mode="type" asp-route-id="@type.Id" asp-route-roleId="@selected.Id" aria-label="Edit @type.Name" data-role-target>Edit</a>
                     </div>
                 }
                 @if (Model.Data.DocumentTypes.Count == 0)

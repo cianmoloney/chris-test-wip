@@ -83,7 +83,7 @@
     </form>
 }
 
-<h2>Documents</h2>
+<h2 id="documents-heading">Documents</h2>
 
 @if (Model.MissingDocumentTypes.Count > 0)
 {
@@ -99,26 +99,27 @@
 }
 else
 {
+    <div class="table-scroll" role="region" aria-labelledby="documents-heading" tabindex="0">
     <table class="table table-hover">
         <thead>
             <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Number</th>
-                <th>Start Date</th>
-                <th>Expiry Date</th>
-                <th>Status</th>
-                <th>Uploaded</th>
-                <th></th>
+                <th scope="col">Name</th>
+                <th scope="col">Type</th>
+                <th scope="col">Number</th>
+                <th scope="col">Start Date</th>
+                <th scope="col">Expiry Date</th>
+                <th scope="col">Status</th>
+                <th scope="col">Uploaded</th>
+                <th scope="col"><span class="visually-hidden">Actions</span></th>
             </tr>
         </thead>
         <tbody>
             @foreach (var document in Model.Documents)
             {
                 <tr>
-                    <td>@document.Name</td>
-                    <td>@(document.Type?.Name ?? document.DocumentType ?? "—")</td>
-                    <td>@(document.DocumentNumber ?? "—")</td>
+                    <td class="cell-text">@document.Name</td>
+                    <td class="cell-text">@(document.Type?.Name ?? document.DocumentType ?? "—")</td>
+                    <td class="cell-text">@(document.DocumentNumber ?? "—")</td>
                     <td>@(document.StartDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                     <td>@(document.ExpiryDate?.ToString("yyyy-MM-dd") ?? "—")</td>
                     <td>
@@ -163,44 +164,49 @@ else
                         </button>
                     </td>
                 </tr>
-                <tr class="collapse" id="edit-@document.Id">
-                    <td colspan="8">
-                        <form method="post" asp-page-handler="UpdateDocument" asp-route-id="@document.StaffId" class="row g-2 align-items-end">
-                            <input type="hidden" name="documentId" value="@document.Id" />
-                            <div class="col-md-3">
-                                <label class="form-label">Type</label>
-                                <select name="documentTypeId" class="form-select form-select-sm">
-                                    <option value="">— Select type —</option>
-                                    @foreach (var type in Model.DocumentTypesList)
-                                    {
-                                        <option value="@type.Id" selected="@(document.DocumentTypeId == type.Id)">@type.Name</option>
-                                    }
-                                </select>
-                            </div>
-                            <div class="col-md-3">
-                                <label class="form-label">Number</label>
-                                <input type="text" name="documentNumber" class="form-control form-control-sm" value="@document.DocumentNumber" />
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label">Start</label>
-                                <input type="date" name="startDate" class="form-control form-control-sm" value="@document.StartDate?.ToString("yyyy-MM-dd")" />
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label">Expiry</label>
-                                <input type="date" name="expiryDate" class="form-control form-control-sm" value="@document.ExpiryDate?.ToString("yyyy-MM-dd")" />
-                            </div>
-                            <div class="col-md-2">
-                                <button type="submit" class="btn btn-sm btn-primary">Save changes</button>
-                            </div>
-                        </form>
-                    </td>
-                </tr>
             }
         </tbody>
     </table>
+    </div>
+    @foreach (var document in Model.Documents)
+    {
+        <section class="collapse document-editor" id="edit-@document.Id" aria-labelledby="edit-heading-@document.Id">
+            <h3 id="edit-heading-@document.Id">Edit @document.Name</h3>
+            <form method="post" asp-page-handler="UpdateDocument" asp-route-id="@document.StaffId" class="mb-4">
+                <fieldset class="row g-3" disabled="@(!User.HasClaim("permission", Permissions.DocumentsWrite))">
+                    <input type="hidden" name="documentId" value="@document.Id" />
+                    <div class="col-md-6">
+                        <label for="document-type-@document.Id" class="form-label">Type</label>
+                        <select id="document-type-@document.Id" name="documentTypeId" class="form-select">
+                            <option value="">— Select type —</option>
+                            @foreach (var type in Model.DocumentTypesList)
+                            {
+                                <option value="@type.Id" selected="@(document.DocumentTypeId == type.Id)">@type.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="document-number-@document.Id" class="form-label">Number</label>
+                        <input id="document-number-@document.Id" type="text" name="documentNumber" class="form-control" value="@document.DocumentNumber" />
+                    </div>
+                    <div class="col-md-6">
+                        <label for="document-start-@document.Id" class="form-label">Start</label>
+                        <input id="document-start-@document.Id" type="date" name="startDate" class="form-control" value="@document.StartDate?.ToString("yyyy-MM-dd")" />
+                    </div>
+                    <div class="col-md-6">
+                        <label for="document-expiry-@document.Id" class="form-label">Expiry</label>
+                        <input id="document-expiry-@document.Id" type="date" name="expiryDate" class="form-control" value="@document.ExpiryDate?.ToString("yyyy-MM-dd")" />
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">Save changes</button>
+                    </div>
+                </fieldset>
+            </form>
+        </section>
+    }
 }
 
-<h2>Agreements</h2>
+<h2 id="agreements-heading">Agreements</h2>
 
 @if (Model.Readiness?.MissingTerms is { Count: > 0 } missingTerms)
 {
@@ -221,15 +227,16 @@ else
 }
 else
 {
+    <div class="table-scroll" role="region" aria-labelledby="agreements-heading" tabindex="0">
     <table class="table table-hover">
         <thead>
             <tr>
-                <th>Terms</th>
-                <th>Version</th>
-                <th>Language</th>
-                <th>Status</th>
-                <th>Terms created</th>
-                <th>Accepted</th>
+                <th scope="col">Terms</th>
+                <th scope="col">Version</th>
+                <th scope="col">Language</th>
+                <th scope="col">Status</th>
+                <th scope="col">Terms created</th>
+                <th scope="col">Accepted</th>
             </tr>
         </thead>
         <tbody>
@@ -237,7 +244,7 @@ else
             {
                 var version = agreement.TermsDocumentVersion;
                 <tr>
-                    <td>@version.TermsDocument.Title</td>
+                    <td class="cell-text">@version.TermsDocument.Title</td>
                     <td>@version.Version</td>
                     <td>@version.Language</td>
                     <td>
@@ -256,6 +263,7 @@ else
             }
         </tbody>
     </table>
+    </div>
 }
 
 @section Scripts {

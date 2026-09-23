@@ -27,6 +27,12 @@
 	});
 	window.addEventListener('pageshow', () => { leaving = false; });
 
+	document.addEventListener('shown.bs.collapse', event => {
+		if (!event.target.matches('.document-editor')) return;
+		event.target.scrollIntoView({ block: 'start' });
+		event.target.querySelector('select:not(:disabled), input:not([type="hidden"]):not(:disabled)')?.focus({ preventScroll: true });
+	});
+
 	const roleSelector = document.querySelector('[data-role-selector]');
 	const requirements = document.querySelector('[data-role-requirements]');
 	if (roleSelector && requirements) {

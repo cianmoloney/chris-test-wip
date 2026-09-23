@@ -1,5 +1,5 @@
 @{ var targetPage = ViewContext.RouteData.Values["page"]?.ToString(); var token = ViewContext.HttpContext.Request.Query["token"].ToString(); }
-<nav class="d-flex flex-wrap gap-3 mb-3" aria-label="Language">
+<nav class="worker-language d-flex flex-wrap gap-2 mb-3" aria-label="Language">
     <a asp-page="@targetPage" asp-route-token="@token" asp-route-lang="en" lang="en">English</a>
     <a asp-page="@targetPage" asp-route-token="@token" asp-route-lang="pl" lang="pl">Polski</a>
     <a asp-page="@targetPage" asp-route-token="@token" asp-route-lang="uk" lang="uk">Українська</a>

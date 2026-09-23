@@ -4,9 +4,15 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { createHash } = require('node:crypto');
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { mkdirSync } = require('node:fs');
+const { chromium, webkit } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 async function verify() {
+    const mobileSuite = process.env.BROWSER_TEST_SUITE === 'mobile';
+    const longToken = 'CertificateReference'.repeat(6);
+    let acceptedAt = null;
+    let requireMfa = false;
+    let emptyData = false;
     const calls = [];
     const permissions = ['Staff.Read', 'Staff.Write', 'Documents.Write', 'Documents.Validate', 'Links.Write', 'Users.Write', 'Terms.Write'];
     const account = { id: 1, email: 'admin@example.invalid', roleId: 1, role: 'Admin', isEnabled: true, mfaEnabled: false, permissions };
@@ -15,7 +21,7 @@ async function verify() {
     const officeRoles = [{ id: 1, name: 'Admin', responsibilities: permissions }, { id: 2, name: 'HR', responsibilities: ['Staff.Read'] }];
     const terms = [{ id: 1, title: 'Safety & Induction' }, { id: 2, title: 'Site rules' }, { id: 3, title: 'Empty document' }];
     const versions = documentId => documentId === 3 ? [] : [
-        { id: documentId * 10 + 1, termsDocument: terms[documentId - 1], content: 'English <script>not executable</script>', language: 'en', version: 2, isActive: true, createdAt: '2026-09-01T00:00:00Z' },
+        { id: documentId * 10 + 1, termsDocument: terms[documentId - 1], content: mobileSuite ? `Safety policy\n\nLong reference: ${longToken}\nhttps://example.invalid/policy/${longToken}\n\nEnglish <script>not executable</script>` : 'English <script>not executable</script>', language: 'en', version: 2, isActive: true, createdAt: '2026-09-01T00:00:00Z' },
         { id: documentId * 10 + 2, termsDocument: terms[documentId - 1], content: 'Polish edition', language: 'pl', version: 1, isActive: false, createdAt: '2026-08-01T00:00:00Z' }
     ];
     const staff = [
@@ -49,10 +55,15 @@ async function verify() {
         calls.push({ method: request.method, route, payload });
         response.setHeader('Content-Type', 'application/json');
         function json(value, status = 200) { response.statusCode = status; response.end(JSON.stringify(value)); }
-        if (route === '/accounts/login') return json({ token: 'fixture-session', requiresMfa: false, expiresAt: new Date(Date.now() + 3600000).toISOString(), user: account });
+        if (route === '/accounts/login' || route === '/accounts/mfa') {
+            if (payload.password === 'invalid-password' || (route === '/accounts/mfa' && payload.code !== '123456')) return json({ status: 400, detail: 'Invalid sign-in details. Please check your email and verification code.' }, 400);
+            const challenge = route === '/accounts/login' && requireMfa;
+            return json({ token: challenge ? 'fixture-challenge' : 'fixture-session', requiresMfa: challenge, expiresAt: new Date(Date.now() + 3600000).toISOString(), user: challenge ? null : account });
+        }
         if (route === '/accounts/logout') return json({});
         if (route === '/accounts/me') return json(revoked ? {} : account, revoked ? 401 : 200);
-        if (route === '/links' && request.method === 'POST') return json({ token: 'fixture-upload-token', purpose: 'upload', expiresAt: new Date(Date.now() + 3600000).toISOString() });
+        if (route === '/links' && request.method === 'POST') return json({ token: 'fixture-upload-token', purpose: payload.purpose, expiresAt: new Date(Date.now() + 3600000).toISOString(), id: '11111111-1111-1111-1111-111111111111' });
+        if (route.startsWith('/links/') && request.method === 'DELETE') return json({});
         if (route === '/public/upload') {
             if (failUpload) {
                 response.setHeader('Content-Type', 'application/problem+json');
@@ -103,21 +114,27 @@ async function verify() {
             return json({});
         }
         if (request.method === 'PUT') return json({}, 200);
-        if (route === '/lookups') return json({ staffRoles: roles, staffTypes: [], documentTypes: types, roleRequiredDocuments: {} });
+        if (route === '/lookups') return json({ staffRoles: roles, staffTypes: [{ id: 1, name: 'Permanent' }], documentTypes: types, roleRequiredDocuments: {} });
         if (route === '/document-types') return json(failUploadTypes ? {} : { documentTypes: types, staffRoles: roles }, failUploadTypes ? 503 : 200);
         if (route === '/roles') return json({ roles: officeRoles, responsibilities: permissions });
-        if (route === '/terms') return json(terms.map(document => ({ ...document, staffRoleIds: document.staffRoleIds || [], roleRevision: revision(document.staffRoleIds || []) })));
+        if (route === '/terms') return json(emptyData ? [] : terms.map(document => ({ ...document, staffRoleIds: document.staffRoleIds || [], roleRevision: revision(document.staffRoleIds || []) })));
         if (/^\/terms\/\d+\/versions$/.test(route)) return json(failTerms ? {} : versions(Number(route.split('/')[2])), failTerms ? 500 : 200);
-        if (route === '/staff') return json({ staff: staff.filter(worker => !url.searchParams.get('filter') || worker.firstName.includes(url.searchParams.get('filter'))), lastTermsAcceptedAt: {}, readiness: {} });
+        if (route === '/staff') return json({ staff: emptyData ? [] : staff.filter(worker => !url.searchParams.get('filter') || worker.firstName.includes(url.searchParams.get('filter'))), lastTermsAcceptedAt: {}, readiness: {} });
         if (route === '/staff/1') return json({
             staff: staff[0], documents: documents.filter(document => document.staffId === 1),
             agreements: [{ id: 1, termsDocumentVersion: versions(1)[1], acceptedAt: '2026-08-02T00:00:00Z' }],
             staffRoles: roles, staffTypes: [staff[0].staffType], documentTypes: types,
             missingDocumentTypes: staffReadiness.isReady ? [] : [types[1]], readiness: staffReadiness
         });
-        if (route === '/documents') return json({ documents, staff, documentTypes: types });
+        if (route === '/documents') return json({ documents: emptyData ? [] : documents, staff, documentTypes: types });
         if (route === '/users') return json({ users: [account, { id: 2, email: 'hr@example.invalid', roleId: 2, role: 'HR', isEnabled: false, mfaEnabled: true, permissions: ['Staff.Read'] }], roles: officeRoles });
-        if (route === '/public/resolve') return json({ purpose: 'register-many', lookups: { staffRoles: roles, staffTypes: [{ id: 1, name: 'Permanent' }], documentTypes: types, roleRequiredDocuments: { 1: ['Induction'], 2: ['Safety'] } } });
+        if (route === '/public/resolve') {
+            if (['invalid', 'expired'].includes(payload.token)) return json({ status: 403, detail: 'Link is invalid or expired.' }, 403);
+            return json({ purpose: payload.purpose, staff: staff[0], terms: payload.token === 'no-terms' ? null : { ...versions(1)[0], language: payload.language }, acceptedAt,
+                lookups: { staffRoles: roles, staffTypes: [{ id: 1, name: 'Permanent' }], documentTypes: types, roleRequiredDocuments: { 1: ['Induction'], 2: ['Safety'] } } });
+        }
+        if (route === '/public/accept') { acceptedAt = '2026-09-23T12:00:00Z'; return json({ acceptedAt }); }
+        if (route === '/public/register') return json({ ...staff[0], ...payload.staff });
         if (route === '/public/register-many') return json({ staff: payload.staff.map((worker, index) => ({ ...staff[0], ...worker, id: index + 1 })) });
         json({}, 404);
     });
@@ -127,7 +144,8 @@ async function verify() {
         const url = new URL(request.url, 'http://localhost');
         const prefix = url.searchParams.get('prefix') || '';
         response.setHeader('Content-Type', 'application/xml');
-        response.end(`<?xml version="1.0" encoding="utf-8"?><EnumerationResults ServiceEndpoint="http://127.0.0.1:10000/devstoreaccount1/" ContainerName="uploads"><Prefix>${prefix}</Prefix><Delimiter>/</Delimiter><Blobs>${prefix ? '' : '<BlobPrefix><Name>2026/</Name></BlobPrefix>'}</Blobs><NextMarker /></EnumerationResults>`);
+        const file = mobileSuite && !emptyData ? `<Blob><Name>${prefix}Safety-certificate-${longToken}.pdf</Name><Properties><Last-Modified>Wed, 23 Sep 2026 12:00:00 GMT</Last-Modified><Etag>0x123</Etag><Content-Length>4096</Content-Length><Content-Type>application/pdf</Content-Type><BlobType>BlockBlob</BlobType><LeaseStatus>unlocked</LeaseStatus></Properties></Blob>` : '';
+        response.end(`<?xml version="1.0" encoding="utf-8"?><EnumerationResults ServiceEndpoint="http://127.0.0.1:10000/devstoreaccount1/" ContainerName="uploads"><Prefix>${prefix}</Prefix><Delimiter>/</Delimiter><Blobs>${prefix || emptyData ? '' : '<BlobPrefix><Name>2026/</Name></BlobPrefix>'}${file}</Blobs><NextMarker /></EnumerationResults>`);
     });
     try {
         storage.listen(10000, '127.0.0.1');
@@ -151,7 +169,9 @@ async function verify() {
                 if (match) { clearTimeout(deadline); resolve(match[1]); }
             });
         });
-        browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge', headless: true });
+        browser = process.env.BROWSER_TEST_ENGINE === 'webkit'
+            ? await webkit.launch({ headless: true })
+            : await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || 'msedge', headless: true });
         const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 } });
         const page = await context.newPage();
         page.setDefaultTimeout(10000);
@@ -177,6 +197,273 @@ async function verify() {
         await page.locator('#Email').fill(account.email);
         await page.locator('#password').fill('fixture-password-only');
         await Promise.all([page.waitForURL(baseUrl + '/'), page.getByRole('button', { name: 'Sign in', exact: true }).click()]);
+
+        if (process.env.BROWSER_TEST_SUITE === 'mobile-shell') {
+            for (const width of [320, 390, 768, 1440]) {
+                await page.setViewportSize({ width, height: 900 });
+                await open('/StaffNew');
+                if (process.env.BROWSER_TEST_ARTIFACTS) {
+                    mkdirSync(process.env.BROWSER_TEST_ARTIFACTS, { recursive: true });
+                    await page.screenshot({ path: path.join(process.env.BROWSER_TEST_ARTIFACTS, `shell-${width}.png`), fullPage: true });
+                }
+                assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `Page overflow at ${width}px`);
+                const inputs = await page.locator('main .form-control, main .form-select').evaluateAll(elements => elements.map(element => parseFloat(getComputedStyle(element).fontSize)));
+                assert(inputs.every(size => size >= 16), `Inputs must remain readable at ${width}px: ${inputs}`);
+                if (width < 768) {
+                    const targets = await page.locator('main .btn').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().height));
+                    assert(targets.every(height => height >= 44), `Touch targets too small at ${width}px: ${targets}`);
+                }
+                assert(await page.evaluate(() => document.querySelector('footer').getBoundingClientRect().top >= document.querySelector('main').getBoundingClientRect().bottom), 'Footer overlaps content');
+            }
+            console.log('PASS: responsive shell, readable inputs, touch targets and footer at phone/tablet/desktop widths.');
+            return;
+        }
+
+        if (process.env.BROWSER_TEST_SUITE === 'mobile-tables') {
+            for (const width of [320, 390, 768, 1440]) {
+                await page.setViewportSize({ width, height: 900 });
+                for (const route of ['/Staff', '/StaffMember/1', '/Files', '/Users']) {
+                    await open(route);
+                    const overflow = await page.evaluate(() => [...document.querySelectorAll('body *')].filter(element => (element.matches('.table-scroll') || !element.closest('.table-scroll')) && (element.getBoundingClientRect().right > innerWidth + 1 || element.scrollWidth > element.clientWidth + 1)).map(element => `${element.tagName}.${element.className}: right=${element.getBoundingClientRect().right}, scroll=${element.scrollWidth}, width=${element.clientWidth}`));
+                    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${route} page overflow at ${width}px: ${overflow.join(', ')}`);
+                    const regions = page.locator('.table-scroll');
+                    assert(await regions.count() > 0);
+                    for (const region of await regions.all()) {
+                        assert.equal(await region.getAttribute('tabindex'), '0');
+                        assert(await region.getAttribute('aria-labelledby'));
+                        if (width < 768) {
+                            assert(await region.evaluate(element => element.scrollWidth > element.clientWidth), `${route} should scroll locally`);
+                            await region.focus();
+                            await page.keyboard.press('End');
+                            await region.evaluate(element => element.scrollLeft = element.scrollWidth);
+                            assert(await region.evaluate(element => element.scrollLeft > 0));
+                        }
+                        assert(await region.locator('.cell-text').evaluateAll(cells => cells.every(cell => cell.getBoundingClientRect().width >= 190)), 'Text columns must retain readable widths');
+                    }
+                    if (route === '/StaffMember/1') {
+                        await page.locator('[data-bs-target="#edit-1"]').click();
+                        await page.locator('#edit-1.show').waitFor();
+                        assert.equal(await page.locator('.table-scroll form').count(), 0);
+                        assert(await page.locator('#edit-1').evaluate(element => element.getBoundingClientRect().right <= innerWidth));
+                    }
+                    if (process.env.BROWSER_TEST_ARTIFACTS) {
+                        mkdirSync(process.env.BROWSER_TEST_ARTIFACTS, { recursive: true });
+                        await page.screenshot({ path: path.join(process.env.BROWSER_TEST_ARTIFACTS, `table-${route.replaceAll('/', '-')}-${width}.png`), fullPage: true });
+                    }
+                }
+            }
+            console.log('PASS: all five tables scroll locally with readable columns; staff document editors fit the viewport.');
+            return;
+        }
+
+        if (process.env.BROWSER_TEST_SUITE === 'mobile-forms') {
+            for (const width of [320, 390, 768, 1440]) {
+                await page.setViewportSize({ width, height: 900 });
+                for (const route of ['/Documents', '/GenerateLink', '/DocumentTypes', '/DocumentTypes?Mode=role', '/DocumentTypes?Mode=type&Id=4', '/Roles', '/ManageTerms', '/ManageTerms?Mode=document', '/Users', '/Share?token=fixture&lang=uk', '/Register?token=fixture&lang=pl', '/RegisterMultiple?token=fixture&lang=uk', '/Login', '/AccessDenied']) {
+                    await open(route);
+                    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${route} page overflow at ${width}px`);
+                    const controls = await page.locator('main .form-control:visible, main .form-select:visible, main .btn:visible').evaluateAll(elements => elements.filter(element => !element.closest('.table-scroll')).map(element => ({ name: element.name || element.textContent.trim(), right: element.getBoundingClientRect().right, width: element.getBoundingClientRect().width, scroll: element.scrollWidth, height: element.getBoundingClientRect().height })));
+                    assert(controls.every(control => control.right <= width + 1), `${route} control overflow at ${width}px: ${JSON.stringify(controls)}`);
+                    if (width < 768) assert(controls.every(control => control.height >= 44), `${route} small controls: ${JSON.stringify(controls)}`);
+                    if (process.env.BROWSER_TEST_ARTIFACTS) {
+                        mkdirSync(process.env.BROWSER_TEST_ARTIFACTS, { recursive: true });
+                        await page.screenshot({ path: path.join(process.env.BROWSER_TEST_ARTIFACTS, `form-${route.replace(/[^a-z0-9]/gi, '-')}-${width}.png`), fullPage: true });
+                    }
+                }
+            }
+            console.log('PASS: responsive form layouts and touch controls across office and worker pages.');
+            return;
+        }
+
+        if (mobileSuite) {
+            staff[0].firstName = 'Alexandria';
+            staff[0].lastName = 'Montgomery-Wellington';
+            staff[0].email = 'alexandria.montgomery-wellington@long-company-name.example.invalid';
+            staff[0].phoneNumber = '+353 87 123 4567';
+            roles[0].name = 'Senior construction plant and machinery operator';
+            types[0].name = 'Construction plant operator safety and induction certificate';
+            types[0].textIdentifier = longToken;
+            terms[0].title = 'Site safety, induction and operating requirements';
+            documents[0].name = `Safety-certificate-${longToken}.pdf`;
+            documents[0].startDate = '2026-01-01T00:00:00Z';
+            documents[0].expiryDate = '2027-01-01T00:00:00Z';
+            documents[0].blobName = '2026/09/fixture.pdf';
+            documents[0].containerName = 'uploads';
+            documents[0].extractedName = `${staff[0].firstName} ${staff[0].lastName}`;
+
+            async function checkLayout(target, label, capture = true) {
+                const width = target.viewportSize().width;
+                const problems = await target.evaluate(() => {
+                    const issues = [];
+                    if (document.documentElement.scrollWidth > innerWidth + 1) issues.push(`page width ${document.documentElement.scrollWidth}/${innerWidth}`);
+                    const selectors = 'main h1, main h2, main p, main code, .btn, .form-label, .form-check-label, .form-control, .form-select, .breadcrumb-item, .document-heading, .worker-language a, .touch-link';
+                    for (const element of document.querySelectorAll(selectors)) {
+                        const bounds = element.getBoundingClientRect();
+                        if (!bounds.width || !bounds.height || element.closest('.table-scroll')) continue;
+                        const name = `${element.tagName} ${element.id || element.className}`;
+                        if (bounds.left < -1 || bounds.right > innerWidth + 1) issues.push(`${name} outside viewport: ${bounds.left}/${bounds.right}`);
+                        if (element.matches('.form-control, .form-select') && parseFloat(getComputedStyle(element).fontSize) < 16) issues.push(`${name} font below 16px`);
+                        if (innerWidth < 768 && element.matches('.btn, .touch-link, .worker-language a, .form-check-label') && bounds.height < 44) issues.push(`${name} touch height ${bounds.height}`);
+                        if (element.matches('.btn, .form-check-label') && element.scrollWidth > element.clientWidth + 1) issues.push(`${name} clipped label`);
+                    }
+                    const footer = document.querySelector('footer').getBoundingClientRect();
+                    if (footer.top + 1 < document.querySelector('main').getBoundingClientRect().bottom) issues.push('footer overlap');
+                    return issues;
+                });
+                if (capture && process.env.BROWSER_TEST_ARTIFACTS && [320, 390, 1440].includes(width)) {
+                    mkdirSync(process.env.BROWSER_TEST_ARTIFACTS, { recursive: true });
+                    await target.screenshot({ path: path.join(process.env.BROWSER_TEST_ARTIFACTS, `${label.replace(/[^a-z0-9]/gi, '-')}-${width}.png`), fullPage: true });
+                }
+                assert.deepEqual(problems, [], `${label} at ${width}px`);
+            }
+
+            async function visit(target, route, expected = 'main h1') {
+                const response = await target.goto(baseUrl + route, { waitUntil: 'networkidle' });
+                assert.equal(response.status(), route === '/AccessDenied' ? 403 : 200, route);
+                assert.equal(new URL(target.url()).pathname, new URL(baseUrl + route).pathname, `Unexpected redirect from ${route}`);
+                await target.locator(expected).first().waitFor();
+                await checkLayout(target, route);
+            }
+
+            const officePages = ['/', '/Login', '/Account', '/Staff', '/StaffMember/1', '/StaffNew', '/Documents', '/Files', '/GenerateLink', '/DocumentTypes', '/Roles', '/Users', '/ManageTerms', '/UploadFile', '/AccessDenied', '/Error'];
+            const modes = ['/DocumentTypes?Mode=role', '/DocumentTypes?Mode=type', '/DocumentTypes?Mode=type&Id=4', '/ManageTerms?Mode=document', '/ManageTerms?Mode=version&DocumentId=1', '/ManageTerms?DocumentId=3', '/Files?prefix=2026/09/' + longToken + '/'];
+            for (const width of [320, 360, 390, 430, 768, 844, 1024, 1440]) {
+                await page.setViewportSize({ width, height: width === 844 ? 390 : 900 });
+                for (const route of officePages) await visit(page, route);
+                if ([320, 390, 768, 1440].includes(width)) {
+                    for (const route of modes) await visit(page, route);
+                }
+            }
+
+            const workerContext = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 320, height: 740 }, isMobile: true, hasTouch: true });
+            const worker = await workerContext.newPage();
+            worker.on('pageerror', error => errors.push(error.message));
+            worker.on('dialog', dialog => dialog.accept());
+            const workerPages = ['/Register?token=fixture', '/RegisterMultiple?token=fixture', '/Share?token=fixture', '/Terms?token=fixture', '/RegistrationComplete?', '/UploadComplete?'];
+            for (const width of [320, 390, 844, 1440]) {
+                await worker.setViewportSize({ width, height: width === 844 ? 390 : 900 });
+                for (const language of ['en', 'pl', 'uk']) {
+                    for (const route of workerPages) await visit(worker, route + `&lang=${language}`);
+                }
+            }
+
+            for (const width of [320, 1440]) {
+                await page.setViewportSize({ width, height: 900 });
+                await worker.setViewportSize({ width, height: 900 });
+                for (const route of ['/Staff', '/StaffMember/1', '/Files', '/Users']) {
+                    await visit(page, route);
+                    for (const region of await page.locator('.table-scroll').all()) {
+                        assert.equal(await region.getAttribute('role'), 'region');
+                        assert.equal(await region.getAttribute('tabindex'), '0');
+                        assert(await region.locator('th').evaluateAll(headers => headers.every(header => header.scope === 'col')));
+                        if (width === 320) {
+                            assert(await region.evaluate(element => element.scrollWidth > element.clientWidth));
+                            await region.focus();
+                            await page.keyboard.press('ArrowRight');
+                            await page.waitForFunction(() => document.activeElement.scrollLeft > 0);
+                            await region.evaluate(element => element.scrollLeft = element.scrollWidth);
+                        }
+                    }
+                    if (route === '/StaffMember/1') {
+                        await page.locator('[data-bs-target="#edit-1"]').click();
+                        await page.locator('#edit-1.show').waitFor();
+                        await page.waitForFunction(() => document.activeElement.id === 'document-type-1');
+                        await checkLayout(page, 'staff-document-editor');
+                        await page.locator('#document-number-1').fill('MOBILE-SAVE');
+                        calls.length = 0;
+                        await Promise.all([page.waitForNavigation(), page.locator('#edit-1 button[type="submit"]').click()]);
+                        assert(calls.some(call => call.method === 'PUT' && call.route === '/staff/1/documents/1' && call.payload.documentNumber === 'MOBILE-SAVE'));
+                    }
+                }
+                for (const purpose of ['register', 'register-many', 'upload', 'terms']) {
+                    await visit(page, '/GenerateLink');
+                    await page.locator('#LinkType').selectOption(purpose);
+                    if (purpose === 'terms') {
+                        await page.locator('#StaffId').selectOption('1');
+                        await page.locator('#TermsDocumentId').selectOption('1');
+                    }
+                    await Promise.all([page.waitForNavigation(), page.getByRole('button', { name: 'Generate secure link', exact: true }).click()]);
+                    assert.match(await page.getByRole('textbox', { name: 'Secure link', exact: true }).inputValue(), /token=fixture-upload-token/);
+                    await checkLayout(page, `generated-${purpose}`);
+                    await Promise.all([page.waitForNavigation(), page.getByRole('button', { name: 'Revoke link', exact: true }).click()]);
+                }
+                for (const language of ['en', 'pl', 'uk']) {
+                    await visit(worker, `/Terms?token=fixture&lang=${language}`, '#Agree');
+                    assert.equal(await worker.locator('.card-text').textContent(), versions(1)[0].content);
+                    await worker.locator('#Agree').check();
+                    await Promise.all([worker.waitForNavigation(), worker.locator('main button[type="submit"]').click()]);
+                    assert.equal(await worker.locator('.alert-success').count(), 1);
+                    await checkLayout(worker, `terms-accepted-${language}`);
+                    await visit(worker, `/Terms?token=fixture&lang=${language}`, '.alert-success');
+                    acceptedAt = null;
+                    await visit(worker, `/Terms?token=no-terms&lang=${language}`, '.alert-warning');
+                    for (const route of ['/Register', '/RegisterMultiple', '/Share', '/Terms']) {
+                        await visit(worker, `${route}?token=expired&lang=${language}`, '.alert-danger');
+                    }
+                }
+                await visit(worker, '/Share?token=fixture&lang=uk', 'input[type="file"]');
+                await worker.locator('input[type="file"]').setInputFiles({ name: `${longToken}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 fixture') });
+                await checkLayout(worker, 'worker-upload-selected');
+                failUpload = true;
+                await Promise.all([worker.waitForNavigation(), worker.locator('main button[type="submit"]').click()]);
+                assert.equal(await worker.locator('.alert-info').count(), 1);
+                await checkLayout(worker, 'worker-upload-error');
+                failUpload = false;
+                await worker.locator('input[type="file"]').setInputFiles({ name: 'fixture.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 fixture') });
+                await Promise.all([worker.waitForURL(/UploadComplete/), worker.locator('main button[type="submit"]').click()]);
+                await checkLayout(worker, 'worker-upload-complete');
+
+                for (const route of ['/Staff', '/Documents', '/Files', '/ManageTerms']) {
+                    emptyData = true;
+                    await visit(page, route);
+                    await checkLayout(page, `empty-${route}`);
+                    emptyData = false;
+                }
+                await visit(worker, '/Register?token=fixture&lang=pl');
+                await worker.locator('main button[type="submit"]').click();
+                await worker.locator('.field-validation-error').first().waitFor();
+                assert(await worker.locator('.field-validation-error').count() > 0);
+                await checkLayout(worker, 'registration-validation');
+            }
+
+            await worker.setViewportSize({ width: 320, height: 740 });
+            await visit(worker, '/Login');
+            await worker.locator('#Email').fill('admin@example.invalid');
+            await worker.locator('#password').fill('invalid-password');
+            await Promise.all([worker.waitForNavigation(), worker.getByRole('button', { name: 'Sign in', exact: true }).click()]);
+            await checkLayout(worker, 'login-error');
+            requireMfa = true;
+            await worker.locator('#password').fill('fixture-password-only');
+            await Promise.all([worker.waitForNavigation(), worker.getByRole('button', { name: 'Sign in', exact: true }).click()]);
+            await worker.locator('#Code').waitFor();
+            await checkLayout(worker, 'login-mfa');
+            await worker.locator('#Code').fill('123456');
+            await Promise.all([worker.waitForURL(baseUrl + '/'), worker.getByRole('button', { name: 'Sign in', exact: true }).click()]);
+            requireMfa = false;
+            await visit(worker, '/Staff');
+            const scrollRegion = worker.locator('.table-scroll');
+            await scrollRegion.evaluate(element => element.scrollLeft = element.scrollWidth);
+            await Promise.all([worker.waitForURL(/GenerateLink/), scrollRegion.getByRole('link', { name: 'Terms link', exact: true }).first().tap()]);
+            await checkLayout(worker, 'touch-table-action');
+
+            await page.setViewportSize({ width: 320, height: 740 });
+            for (const route of ['/', '/Staff', '/StaffMember/1', '/Documents', '/GenerateLink', '/Error']) {
+                await visit(page, route);
+                await page.addStyleTag({ content: 'html { font-size: 200% !important; }' });
+                await checkLayout(page, `enlarged-${route}`);
+            }
+            const noScript = await browser.newContext({ ignoreHTTPSErrors: true, javaScriptEnabled: false, viewport: { width: 320, height: 740 }, storageState: await context.storageState() });
+            const fallback = await noScript.newPage();
+            for (const route of ['/DocumentTypes', '/Roles', '/ManageTerms', '/RegisterMultiple?token=fixture&lang=uk']) await visit(fallback, route);
+            await Promise.all([fallback.waitForNavigation(), fallback.locator('[data-add-staff]').click()]);
+            assert.equal(await fallback.locator('[data-staff-entry]').count(), 2);
+            await checkLayout(fallback, 'no-js-registration');
+            await noScript.close();
+            await workerContext.close();
+            assert.deepEqual(errors, []);
+            console.log('PASS: all 22 pages; 320-1440px, landscape/tablet, en/pl/uk worker flows, long content, tables/editing, links/revocation, uploads, terms acceptance, MFA, empty/error states, touch, enlarged text and no-JavaScript layouts.');
+            return;
+        }
 
         const menuLabels = ['Manage Staff', 'Document Explorer', 'Generate Link', 'Manage Terms', 'Accounts', 'Access Editor'];
         const menuRoutes = ['/Staff', '/Documents', '/GenerateLink', '/ManageTerms', '/Users', '/Roles'];
